@@ -230,22 +230,20 @@ class EnhancedSanctionsScreener:
             'features': []
         }
         
-        # Parse identity documents
-        identity_section = elem.find(f'{ns}identity')
-        if identity_section is not None:
-            id_docs = identity_section.find(f'{ns}idDocuments')
-            if id_docs is not None:
-                for doc in id_docs.findall(f'{ns}idDocument'):
-                    doc_type = self._get_text(doc, f'{ns}type')
-                    doc_number = self._get_text(doc, f'{ns}number')
-                    if doc_number:
-                        entity['identity_documents'].append({
-                            'type': doc_type or 'Unknown',
-                            'number': doc_number,
-                            'issuingCountry': self._get_text(doc, f'{ns}issuedByCountry'),
-                            'issueDate': self._get_text(doc, f'{ns}issueDate'),
-                            'expirationDate': self._get_text(doc, f'{ns}expirationDate')
-                        })
+        # Parse identity documents (directly under entity per OFAC XSD)
+        id_docs_section = elem.find(f'{ns}idDocuments')
+        if id_docs_section is not None:
+            for doc in id_docs_section.findall(f'{ns}idDocument'):
+                doc_type = self._get_text(doc, f'{ns}type')
+                doc_number = self._get_text(doc, f'{ns}number')
+                if doc_number:
+                    entity['identity_documents'].append({
+                        'type': doc_type or 'Unknown',
+                        'number': doc_number,
+                        'issuingCountry': self._get_text(doc, f'{ns}issuedByCountry'),
+                        'issueDate': self._get_text(doc, f'{ns}issueDate'),
+                        'expirationDate': self._get_text(doc, f'{ns}expirationDate')
+                    })
         
         # Parse features
         features_section = elem.find(f'{ns}features')
