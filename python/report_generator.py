@@ -1,16 +1,37 @@
 """
-Sistema de Generación de Reportes de Constancia
-Genera reportes oficiales con información de screening y metadata de listas
+Enhanced Report Generation System v2.0
+Generates official screening reports with comprehensive metadata and audit trail
+
+Features:
+- Pre-generation validation checks
+- Enhanced metadata section (algorithm version, thresholds, processing time)
+- Audit trail with unique screening IDs
+- Data freshness warnings
+- Configurable reporting options
 """
 
+import uuid
+import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import json
 import hashlib
 from jinja2 import Template
 import xml.etree.ElementTree as ET
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+class ReportValidationError(Exception):
+    """Raised when report validation fails"""
+    pass
 
 
 @dataclass
@@ -27,8 +48,19 @@ class ListMetadata:
 
 
 @dataclass
+class ConfidenceBreakdown:
+    """Detailed confidence score breakdown for a match"""
+    overall: float
+    name: float = 0.0
+    document: float = 0.0
+    dob: float = 0.0
+    nationality: float = 0.0
+    address: float = 0.0
+
+
+@dataclass
 class ScreeningMatch:
-    """Resultado de un match individual"""
+    """Resultado de un match individual with enhanced fields"""
     matched_name: str
     match_score: float
     entity_id: str
@@ -38,7 +70,15 @@ class ScreeningMatch:
     countries: List[str]
     all_names: List[str]
     
-    # Campos adicionales del ejemplo
+    # Confidence breakdown
+    confidence_breakdown: Optional[ConfidenceBreakdown] = None
+    
+    # Flags and recommendation
+    flags: List[str] = field(default_factory=list)
+    recommendation: str = 'MANUAL_REVIEW'
+    match_layer: int = 4  # 1=exact, 2=high, 3=moderate, 4=low
+    
+    # Additional fields
     last_name: Optional[str] = None
     first_name: Optional[str] = None
     nationality: Optional[str] = None
@@ -53,58 +93,111 @@ class ScreeningMatch:
 
 
 @dataclass
+class ScreeningConfig:
+    """Configuration snapshot for audit trail"""
+    algorithm_version: str = "2.0.0"
+    algorithm_name: str = "Multi-Layer Fuzzy Matcher"
+    name_threshold: int = 85
+    short_name_threshold: int = 95
+    weights: Dict[str, float] = field(default_factory=lambda: {
+        'name': 0.40,
+        'document': 0.30,
+        'dob': 0.15,
+        'nationality': 0.10,
+        'address': 0.05
+    })
+    recommendation_thresholds: Dict[str, int] = field(default_factory=lambda: {
+        'auto_clear': 60,
+        'manual_review': 85,
+        'auto_escalate': 95
+    })
+
+
+@dataclass
 class ScreeningResult:
-    """Resultado completo de screening"""
+    """Complete screening result with audit trail support"""
     input_name: str
     input_document: str
     input_country: str
     screening_date: datetime
     matches: List[ScreeningMatch]
     is_hit: bool
+    
+    # Audit trail fields
+    screening_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     analyst_name: Optional[str] = None
+    operator_id: Optional[str] = None
+    
+    # Decision fields
     decision: Optional[str] = None
     notes: Optional[str] = None
+    
+    # Configuration snapshot
+    config: Optional[ScreeningConfig] = None
+    
+    # Processing metrics
+    processing_time_ms: Optional[float] = None
+    total_entities_searched: Optional[int] = None
+    
+    # Additional input fields
+    input_dob: Optional[str] = None
+    input_nationality: Optional[str] = None
 
 
 class ReportMetadataCollector:
-    """Recolecta metadata de archivos de sanciones"""
+    """Collects metadata from sanctions data files"""
     
     def __init__(self, data_dir: Path = Path("sanctions_data")):
-        self.data_dir = data_dir
+        self.data_dir = Path(data_dir)
     
     def get_file_hash(self, filepath: Path) -> str:
-        """Calcula SHA256 del archivo"""
+        """Calculate SHA256 hash of file"""
         sha256_hash = hashlib.sha256()
         with open(filepath, "rb") as f:
             for byte_block in iter(lambda: f.read(4096), b""):
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
     
+    def _extract_namespace(self, xml_path: Path) -> str:
+        """Dynamically extract namespace from XML root element"""
+        try:
+            with open(xml_path, 'rb') as f:
+                for event, elem in ET.iterparse(f, events=('start',)):
+                    tag = elem.tag
+                    if tag.startswith('{'):
+                        ns_end = tag.index('}')
+                        return tag[:ns_end + 1]
+                    break
+        except Exception as e:
+            logger.warning(f"Could not extract namespace from {xml_path}: {e}")
+        return ''
+    
     def extract_ofac_metadata(self) -> Optional[ListMetadata]:
-        """Extrae metadata de archivo OFAC"""
+        """Extract metadata from OFAC file with dynamic namespace"""
         xml_file = self.data_dir / "sdn_enhanced.xml"
         if not xml_file.exists():
             return None
         
         try:
-            # Parse XML para contar entidades
-            NAMESPACE = '{https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ENHANCED_XML}'
+            # Extract namespace dynamically
+            namespace = self._extract_namespace(xml_file)
+            
             tree = ET.parse(xml_file)
             root = tree.getroot()
             
-            # Buscar fecha de publicación
-            publish_info = root.find(f'{NAMESPACE}publishInformation')
+            # Find publication date
+            publish_info = root.find(f'{namespace}publishInformation')
             last_update_str = None
             if publish_info is not None:
-                publish_date = publish_info.find(f'{NAMESPACE}publishDate')
+                publish_date = publish_info.find(f'{namespace}publishDate')
                 if publish_date is not None:
                     last_update_str = publish_date.text
             
-            # Contar entidades
-            entities = root.findall(f'.//{NAMESPACE}entity')
+            # Count entities
+            entities = root.findall(f'.//{namespace}entity')
             record_count = len(entities)
             
-            # Metadata del archivo
+            # File metadata
             stat = xml_file.stat()
             
             return ListMetadata(
@@ -118,11 +211,11 @@ class ReportMetadataCollector:
                 version="Enhanced XML"
             )
         except Exception as e:
-            print(f"Error extracting OFAC metadata: {e}")
+            logger.error(f"Error extracting OFAC metadata: {e}")
             return None
     
     def extract_un_metadata(self) -> Optional[ListMetadata]:
-        """Extrae metadata de archivo UN"""
+        """Extract metadata from UN file"""
         xml_file = self.data_dir / "un_consolidated.xml"
         if not xml_file.exists():
             return None
@@ -131,25 +224,26 @@ class ReportMetadataCollector:
             tree = ET.parse(xml_file)
             root = tree.getroot()
             
-            # Contar individuos y entidades
+            # Count individuals and entities
             individuals = len(root.findall('.//INDIVIDUAL'))
             entities = len(root.findall('.//ENTITY'))
             record_count = individuals + entities
             
-            # Buscar fecha de actualización
+            # Get file stat first
+            stat = xml_file.stat()
+            
+            # Find update date
             dategenerated = root.get('dateGenerated')
             last_update = None
             if dategenerated:
                 try:
-                    # Soporta formato ISO con hora y milisegundos
+                    # Support ISO format with time and milliseconds
                     last_update = datetime.fromisoformat(dategenerated.replace('Z', ''))
                 except Exception:
                     try:
                         last_update = datetime.strptime(dategenerated[:10], "%Y-%m-%d")
                     except Exception:
                         last_update = datetime.fromtimestamp(stat.st_mtime)
-            
-            stat = xml_file.stat()
             
             return ListMetadata(
                 source="UN Consolidated Sanctions List",
@@ -161,11 +255,11 @@ class ReportMetadataCollector:
                 file_hash=self.get_file_hash(xml_file)
             )
         except Exception as e:
-            print(f"Error extracting UN metadata: {e}")
+            logger.error(f"Error extracting UN metadata: {e}")
             return None
     
     def collect_all_metadata(self) -> List[ListMetadata]:
-        """Recolecta metadata de todas las listas"""
+        """Collect metadata from all sanctions lists"""
         metadata_list = []
         
         ofac_meta = self.extract_ofac_metadata()
@@ -177,19 +271,183 @@ class ReportMetadataCollector:
             metadata_list.append(un_meta)
         
         return metadata_list
+    
+    def check_data_freshness(self, warning_days: int = 7) -> List[str]:
+        """Check if sanctions data is stale
+        
+        Args:
+            warning_days: Days after which data is considered stale
+            
+        Returns:
+            List of warning messages for stale data
+        """
+        warnings = []
+        metadata_list = self.collect_all_metadata()
+        cutoff = datetime.now() - timedelta(days=warning_days)
+        
+        for meta in metadata_list:
+            if meta.last_update < cutoff:
+                days_old = (datetime.now() - meta.last_update).days
+                warnings.append(
+                    f"{meta.source} data is {days_old} days old "
+                    f"(last update: {meta.last_update.strftime('%Y-%m-%d')})"
+                )
+        
+        return warnings
+
+
+class ReportValidator:
+    """Validates screening results before report generation"""
+    
+    REQUIRED_FIELDS = ['input_name', 'screening_date', 'is_hit', 'matches']
+    
+    def __init__(self, data_freshness_warning_days: int = 7):
+        self.data_freshness_warning_days = data_freshness_warning_days
+    
+    def validate(self, result: ScreeningResult, 
+                list_metadata: List[ListMetadata]) -> Dict[str, Any]:
+        """Validate screening result before report generation
+        
+        Args:
+            result: Screening result to validate
+            list_metadata: List metadata for freshness check
+            
+        Returns:
+            Validation result with 'valid', 'errors', 'warnings' keys
+            
+        Raises:
+            ReportValidationError: If validation fails critically
+        """
+        errors = []
+        warnings = []
+        
+        # Check required fields
+        for field in self.REQUIRED_FIELDS:
+            if not hasattr(result, field) or getattr(result, field) is None:
+                if field == 'matches':
+                    # matches can be empty list
+                    if not hasattr(result, field):
+                        errors.append(f"Missing required field: {field}")
+                else:
+                    errors.append(f"Missing required field: {field}")
+        
+        # Check screening ID
+        if not result.screening_id:
+            warnings.append("No screening_id provided, generating one")
+        
+        # Check for scoring breakdown in matches
+        for i, match in enumerate(result.matches):
+            if match.confidence_breakdown is None:
+                warnings.append(f"Match {i+1} missing confidence breakdown")
+        
+        # Check list metadata freshness
+        cutoff = datetime.now() - timedelta(days=self.data_freshness_warning_days)
+        for meta in list_metadata:
+            if meta.last_update < cutoff:
+                days_old = (datetime.now() - meta.last_update).days
+                warnings.append(
+                    f"⚠️ STALE DATA: {meta.source} is {days_old} days old"
+                )
+        
+        # Check for empty/null critical fields in matches
+        for i, match in enumerate(result.matches):
+            if not match.matched_name:
+                errors.append(f"Match {i+1} has empty matched_name")
+            if not match.entity_id:
+                warnings.append(f"Match {i+1} has no entity_id")
+        
+        is_valid = len(errors) == 0
+        
+        if not is_valid:
+            logger.error(f"Report validation failed: {errors}")
+        if warnings:
+            logger.warning(f"Report validation warnings: {warnings}")
+        
+        return {
+            'valid': is_valid,
+            'errors': errors,
+            'warnings': warnings
+        }
 
 
 class ConstanciaReportGenerator:
-    """Genera reportes de constancia en múltiples formatos"""
+    """Enhanced report generator with validation and audit trail"""
     
-    def __init__(self, output_dir: Path = Path("reports")):
-        self.output_dir = output_dir
+    def __init__(self, output_dir: Path = Path("reports"), 
+                 data_dir: Path = Path("sanctions_data"),
+                 validate_before_generate: bool = True):
+        self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
-        self.metadata_collector = ReportMetadataCollector()
+        self.metadata_collector = ReportMetadataCollector(data_dir)
+        self.validator = ReportValidator()
+        self.validate_before_generate = validate_before_generate
+        
+        # Audit log file (append-only)
+        self.audit_log_path = self.output_dir / "screening_audit.log"
+    
+    def _log_audit(self, result: ScreeningResult, list_metadata: List[ListMetadata]) -> None:
+        """Write immutable audit log entry"""
+        audit_entry = {
+            'screening_id': result.screening_id,
+            'timestamp': datetime.now().isoformat(),
+            'input': {
+                'name': result.input_name,
+                'document': result.input_document,
+                'country': result.input_country,
+                'dob': result.input_dob,
+                'nationality': result.input_nationality
+            },
+            'operator': result.operator_id or result.analyst_name or 'system',
+            'is_hit': result.is_hit,
+            'match_count': len(result.matches),
+            'decision': result.decision,
+            'list_versions': [
+                {
+                    'source': m.source,
+                    'hash': m.file_hash[:16],
+                    'last_update': m.last_update.isoformat()
+                } for m in list_metadata
+            ],
+            'config': {
+                'algorithm_version': result.config.algorithm_version if result.config else '2.0.0',
+                'name_threshold': result.config.name_threshold if result.config else 85
+            } if result.config else None
+        }
+        
+        # Append to audit log
+        with open(self.audit_log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(audit_entry) + '\n')
+        
+        logger.info(f"Audit entry logged: {result.screening_id}")
     
     def generate_html_report(self, result: ScreeningResult, 
-                            list_metadata: List[ListMetadata]) -> str:
-        """Genera reporte HTML profesional"""
+                            list_metadata: List[ListMetadata],
+                            skip_validation: bool = False) -> str:
+        """Generate professional HTML report with validation
+        
+        Args:
+            result: Screening result
+            list_metadata: List metadata
+            skip_validation: Skip pre-generation validation
+            
+        Returns:
+            Path to generated HTML file
+            
+        Raises:
+            ReportValidationError: If validation fails and not skipped
+        """
+        # Validate before generation
+        if self.validate_before_generate and not skip_validation:
+            validation = self.validator.validate(result, list_metadata)
+            if not validation['valid']:
+                raise ReportValidationError(
+                    f"Report validation failed: {validation['errors']}"
+                )
+            if validation['warnings']:
+                logger.warning(f"Report warnings: {validation['warnings']}")
+        
+        # Log audit entry
+        self._log_audit(result, list_metadata)
         
         template = Template("""
 <!DOCTYPE html>
@@ -497,18 +755,50 @@ class ConstanciaReportGenerator:
         return str(filepath)
     
     def generate_json_report(self, result: ScreeningResult, 
-                            list_metadata: List[ListMetadata]) -> str:
-        """Genera reporte JSON estructurado"""
+                            list_metadata: List[ListMetadata],
+                            skip_validation: bool = False) -> str:
+        """Generate structured JSON report with enhanced metadata
+        
+        Args:
+            result: Screening result
+            list_metadata: List metadata
+            skip_validation: Skip pre-generation validation
+            
+        Returns:
+            Path to generated JSON file
+        """
+        # Validate before generation
+        if self.validate_before_generate and not skip_validation:
+            validation = self.validator.validate(result, list_metadata)
+            if not validation['valid']:
+                raise ReportValidationError(
+                    f"Report validation failed: {validation['errors']}"
+                )
+        
         report_data = {
             "screening_info": {
+                "screening_id": result.screening_id,
                 "input_name": result.input_name,
                 "input_document": result.input_document,
                 "input_country": result.input_country,
+                "input_dob": result.input_dob,
+                "input_nationality": result.input_nationality,
                 "screening_date": result.screening_date.isoformat(),
                 "analyst": result.analyst_name,
+                "operator_id": result.operator_id,
                 "is_hit": result.is_hit,
-                "match_count": len(result.matches)
+                "match_count": len(result.matches),
+                "processing_time_ms": result.processing_time_ms,
+                "total_entities_searched": result.total_entities_searched
             },
+            "screening_configuration": {
+                "algorithm_version": result.config.algorithm_version if result.config else "2.0.0",
+                "algorithm_name": result.config.algorithm_name if result.config else "Multi-Layer Fuzzy Matcher",
+                "name_threshold": result.config.name_threshold if result.config else 85,
+                "short_name_threshold": result.config.short_name_threshold if result.config else 95,
+                "weights": result.config.weights if result.config else None,
+                "recommendation_thresholds": result.config.recommendation_thresholds if result.config else None
+            } if result.config else {"algorithm_version": "2.0.0"},
             "matches": [
                 {
                     "matched_name": m.matched_name,
@@ -519,6 +809,16 @@ class ConstanciaReportGenerator:
                     "program": m.program,
                     "countries": m.countries,
                     "all_names": m.all_names,
+                    "confidence_breakdown": {
+                        "overall": m.confidence_breakdown.overall,
+                        "name": m.confidence_breakdown.name,
+                        "document": m.confidence_breakdown.document,
+                        "dob": m.confidence_breakdown.dob,
+                        "nationality": m.confidence_breakdown.nationality
+                    } if m.confidence_breakdown else None,
+                    "flags": m.flags,
+                    "recommendation": m.recommendation,
+                    "match_layer": m.match_layer,
                     "details": {
                         "last_name": m.last_name,
                         "first_name": m.first_name,
@@ -528,7 +828,9 @@ class ConstanciaReportGenerator:
                         "date_of_birth": m.date_of_birth,
                         "place_of_birth": m.place_of_birth,
                         "gender": m.gender
-                    }
+                    },
+                    "identifications": m.identifications,
+                    "addresses": m.addresses
                 }
                 for m in result.matches
             ],
@@ -551,7 +853,8 @@ class ConstanciaReportGenerator:
             ],
             "report_metadata": {
                 "generated_at": datetime.now().isoformat(),
-                "report_version": "2.0"
+                "report_version": "2.0",
+                "screening_id": result.screening_id
             }
         }
 
@@ -563,11 +866,116 @@ class ConstanciaReportGenerator:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(report_data, f, indent=2, ensure_ascii=False)
 
-        print(f"✓ Reporte JSON generado: {filepath}")
+        logger.info(f"✓ JSON report generated: {filepath}")
         return str(filepath)
 
 
-# Ejemplo de uso
+class AuditTrailManager:
+    """Manages immutable audit trail for all screenings"""
+    
+    def __init__(self, audit_dir: Path = Path("reports")):
+        self.audit_dir = Path(audit_dir)
+        self.audit_dir.mkdir(exist_ok=True)
+        self.audit_file = self.audit_dir / "screening_audit.jsonl"
+    
+    def log_screening(self, result: ScreeningResult, 
+                     list_metadata: List[ListMetadata],
+                     config_snapshot: Optional[Dict[str, Any]] = None) -> str:
+        """Log screening to immutable audit trail
+        
+        Args:
+            result: Screening result
+            list_metadata: List metadata
+            config_snapshot: Configuration snapshot
+            
+        Returns:
+            Screening ID
+        """
+        entry = {
+            "screening_id": result.screening_id,
+            "timestamp": datetime.now().isoformat(),
+            "input": {
+                "name": result.input_name,
+                "document": result.input_document,
+                "country": result.input_country,
+                "dob": result.input_dob,
+                "nationality": result.input_nationality
+            },
+            "operator": result.operator_id or result.analyst_name or "system",
+            "result": {
+                "is_hit": result.is_hit,
+                "match_count": len(result.matches),
+                "top_score": max((m.match_score for m in result.matches), default=0)
+            },
+            "decision": result.decision,
+            "list_versions": [
+                {
+                    "source": m.source,
+                    "hash": m.file_hash,
+                    "last_update": m.last_update.isoformat(),
+                    "record_count": m.record_count
+                }
+                for m in list_metadata
+            ],
+            "config": config_snapshot
+        }
+        
+        # Append to JSONL file (one JSON object per line)
+        with open(self.audit_file, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry) + '\n')
+        
+        logger.info(f"Audit trail entry: {result.screening_id}")
+        return result.screening_id
+    
+    def get_screening_by_id(self, screening_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve screening record by ID
+        
+        Args:
+            screening_id: Screening ID to look up
+            
+        Returns:
+            Screening record or None
+        """
+        if not self.audit_file.exists():
+            return None
+        
+        with open(self.audit_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.strip():
+                    entry = json.loads(line)
+                    if entry.get('screening_id') == screening_id:
+                        return entry
+        
+        return None
+    
+    def get_screenings_by_date_range(self, start: datetime, 
+                                     end: datetime) -> List[Dict[str, Any]]:
+        """Get all screenings within date range
+        
+        Args:
+            start: Start datetime
+            end: End datetime
+            
+        Returns:
+            List of screening records
+        """
+        results = []
+        
+        if not self.audit_file.exists():
+            return results
+        
+        with open(self.audit_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.strip():
+                    entry = json.loads(line)
+                    entry_time = datetime.fromisoformat(entry['timestamp'])
+                    if start <= entry_time <= end:
+                        results.append(entry)
+        
+        return results
+
+
+# Example usage
 if __name__ == "__main__":
-    # Analista fijo: Proceso masivo
-    analista = "Proceso masivo"
+    # Example: Generate a test report
+    analyst = "Proceso masivo"
