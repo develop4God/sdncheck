@@ -9,6 +9,8 @@ Features:
 - Nationality coherence validation
 - Quality indicators and recommendation engine
 - Configurable thresholds via config.yaml
+
+SECURITY: Input validation and secure XML parsing to prevent attacks.
 """
 
 import csv
@@ -33,6 +35,7 @@ except ImportError:
     HAS_LXML = False
 
 from config_manager import get_config, ConfigManager
+from xml_utils import sanitize_for_logging, secure_parse, get_secure_parser
 
 # Setup logging
 logging.basicConfig(
@@ -40,6 +43,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Input validation patterns
+NAME_PATTERN = re.compile(r'^[A-Za-zÀ-ÿ\s\-\.\'\,\u0600-\u06FF\u0400-\u04FF\u4E00-\u9FFF]{2,200}$')
+DOB_PATTERN = re.compile(r'^\d{4}(-\d{2}(-\d{2})?)?$')  # YYYY, YYYY-MM, or YYYY-MM-DD
+DOC_NUMBER_PATTERN = re.compile(r'^[A-Za-z0-9\-\s\.]{1,50}$')
 
 
 @dataclass
@@ -97,6 +105,43 @@ class ScreeningInput:
     country: Optional[str] = None
 
 
+class InputValidationError(ValueError):
+    """Raised when input validation fails"""
+    pass
+
+
+def validate_screening_input(input_data: ScreeningInput) -> None:
+    """Validate screening input data for security and correctness
+    
+    Args:
+        input_data: ScreeningInput to validate
+        
+    Raises:
+        InputValidationError: If validation fails
+    """
+    # Validate name
+    if not input_data.name or len(input_data.name.strip()) < 2:
+        raise InputValidationError("Name must be at least 2 characters")
+    if len(input_data.name) > 200:
+        raise InputValidationError("Name must be 200 characters or less")
+    if not NAME_PATTERN.match(input_data.name):
+        # Log sanitized input for debugging
+        logger.warning("Invalid name format: %s", sanitize_for_logging(input_data.name))
+        raise InputValidationError("Name contains invalid characters")
+    
+    # Validate DOB if provided
+    if input_data.date_of_birth:
+        if not DOB_PATTERN.match(input_data.date_of_birth):
+            raise InputValidationError(f"Invalid date format: {input_data.date_of_birth}. Use YYYY, YYYY-MM, or YYYY-MM-DD")
+    
+    # Validate document number if provided
+    if input_data.document_number:
+        if len(input_data.document_number) > 50:
+            raise InputValidationError("Document number must be 50 characters or less")
+        if not DOC_NUMBER_PATTERN.match(input_data.document_number):
+            raise InputValidationError("Document number contains invalid characters")
+
+
 class EnhancedSanctionsScreener:
     """Enhanced screener with multi-layer matching and comprehensive validation"""
     
@@ -147,11 +192,8 @@ class EnhancedSanctionsScreener:
         # Extract namespace dynamically
         ns = self._extract_namespace(xml_file)
         
-        if HAS_LXML:
-            tree = etree.parse(str(xml_file))
-        else:
-            tree = etree.parse(xml_file)
-        root = tree.getroot()
+        # Use secure XML parsing to prevent XXE attacks
+        tree, root = secure_parse(xml_file)
         count = 0
         
         for entity_elem in root.findall(f'.//{ns}entity'):
@@ -324,11 +366,8 @@ class EnhancedSanctionsScreener:
             logger.warning(f"⚠ UN file not found: {xml_file}")
             return 0
         
-        if HAS_LXML:
-            tree = etree.parse(str(xml_file))
-        else:
-            tree = etree.parse(xml_file)
-        root = tree.getroot()
+        # Use secure XML parsing to prevent XXE attacks
+        tree, root = secure_parse(xml_file)
         count = 0
         
         # Parse individuals
@@ -562,7 +601,16 @@ class EnhancedSanctionsScreener:
             
         Returns:
             List of MatchResult objects sorted by confidence
+            
+        Raises:
+            InputValidationError: If input validation fails
         """
+        # Validate input for security
+        validate_screening_input(input_data)
+        
+        # Log search with sanitized input
+        logger.info("Searching for: %s", sanitize_for_logging(input_data.name))
+        
         results = []
         
         # Layer 1: Document exact match (if provided)

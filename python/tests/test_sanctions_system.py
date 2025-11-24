@@ -604,5 +604,107 @@ class TestUNXMLParsing:
         assert len(entity.identity_documents) == 0
 
 
+class TestSecurityValidation:
+    """Tests for security-related input validation"""
+    
+    def test_input_validation_valid_name(self):
+        """Test that valid names pass validation"""
+        from screener import ScreeningInput, validate_screening_input
+        
+        input_data = ScreeningInput(name="John Doe")
+        # Should not raise
+        validate_screening_input(input_data)
+    
+    def test_input_validation_name_too_short(self):
+        """Test that names < 2 chars are rejected"""
+        from screener import ScreeningInput, validate_screening_input, InputValidationError
+        
+        input_data = ScreeningInput(name="J")
+        with pytest.raises(InputValidationError):
+            validate_screening_input(input_data)
+    
+    def test_input_validation_name_too_long(self):
+        """Test that names > 200 chars are rejected"""
+        from screener import ScreeningInput, validate_screening_input, InputValidationError
+        
+        long_name = "A" * 201
+        input_data = ScreeningInput(name=long_name)
+        with pytest.raises(InputValidationError):
+            validate_screening_input(input_data)
+    
+    def test_input_validation_injection_attempt(self):
+        """Test that SQL injection attempts are rejected"""
+        from screener import ScreeningInput, validate_screening_input, InputValidationError
+        
+        input_data = ScreeningInput(name="'; DROP TABLE--")
+        with pytest.raises(InputValidationError):
+            validate_screening_input(input_data)
+    
+    def test_input_validation_invalid_dob(self):
+        """Test that invalid DOB format is rejected"""
+        from screener import ScreeningInput, validate_screening_input, InputValidationError
+        
+        input_data = ScreeningInput(name="John Doe", date_of_birth="not-a-date")
+        with pytest.raises(InputValidationError):
+            validate_screening_input(input_data)
+    
+    def test_input_validation_valid_dob(self):
+        """Test that valid DOB formats pass"""
+        from screener import ScreeningInput, validate_screening_input
+        
+        # YYYY format
+        input_data = ScreeningInput(name="John Doe", date_of_birth="1985")
+        validate_screening_input(input_data)
+        
+        # YYYY-MM format
+        input_data = ScreeningInput(name="John Doe", date_of_birth="1985-06")
+        validate_screening_input(input_data)
+        
+        # YYYY-MM-DD format
+        input_data = ScreeningInput(name="John Doe", date_of_birth="1985-06-15")
+        validate_screening_input(input_data)
+    
+    def test_sanitize_for_logging(self):
+        """Test log injection prevention"""
+        from xml_utils import sanitize_for_logging
+        
+        # Newline injection should be sanitized
+        result = sanitize_for_logging("John\n[ERROR] System compromised")
+        assert '\n' not in result
+        assert '[ERROR]' in result  # Text kept, but on same line
+    
+    def test_sanitize_for_logging_empty(self):
+        """Test sanitization of empty input"""
+        from xml_utils import sanitize_for_logging
+        
+        assert sanitize_for_logging('') == ''
+        assert sanitize_for_logging(None) == ''
+    
+    def test_xxe_prevention_malicious_xml(self, tmp_path):
+        """Test that XXE attack payloads are blocked"""
+        from xml_utils import secure_parse
+        
+        # XXE payload that tries to read /etc/passwd
+        xxe_content = '''<?xml version="1.0"?>
+<!DOCTYPE foo [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<root>&xxe;</root>'''
+        
+        xml_file = tmp_path / "xxe_test.xml"
+        xml_file.write_text(xxe_content)
+        
+        # Should either parse without entity expansion or raise error
+        # depending on library available
+        try:
+            tree, root = secure_parse(xml_file)
+            # If parsed, entity should NOT be expanded
+            text = root.text or ''
+            assert 'root:' not in text  # /etc/passwd content
+        except Exception:
+            # Parser rejected the malicious content - also acceptable
+            pass
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

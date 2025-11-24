@@ -8,6 +8,8 @@ Features:
 - XSD schema validation (optional)
 - Integrity verification (file completeness, hash, mandatory fields)
 - Enhanced UN list parsing with country codes and committees
+
+SECURITY: Uses secure XML parsing to prevent XXE attacks.
 """
 
 import requests
@@ -29,6 +31,7 @@ except ImportError:
     HAS_LXML = False
 
 from config_manager import get_config, ConfigManager
+from xml_utils import sanitize_for_logging, secure_parse, get_secure_parser
 
 # Setup logging
 logging.basicConfig(
@@ -420,12 +423,14 @@ class EnhancedSanctionsDownloader:
         # XSD validation if available and enabled
         if self.config.data.xsd_validation and xsd_path and xsd_path.exists() and HAS_LXML:
             try:
+                # Use secure parser for XSD validation
+                parser = get_secure_parser()
                 with open(xsd_path, 'rb') as f:
-                    schema_doc = etree.parse(f)
+                    schema_doc = etree.parse(f, parser)
                     schema = etree.XMLSchema(schema_doc)
                 
                 with open(xml_path, 'rb') as f:
-                    xml_doc = etree.parse(f)
+                    xml_doc = etree.parse(f, parser)
                 
                 if not schema.validate(xml_doc):
                     for error in schema.error_log:
@@ -764,11 +769,8 @@ class EnhancedSanctionsDownloader:
         entities = []
         
         try:
-            if HAS_LXML:
-                tree = etree.parse(str(xml_path))
-            else:
-                tree = etree.parse(xml_path)
-            root = tree.getroot()
+            # Use secure XML parsing to prevent XXE attacks
+            tree, root = secure_parse(xml_path)
             
             # Parse individuals
             for individual in root.findall('.//INDIVIDUAL'):

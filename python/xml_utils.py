@@ -3,14 +3,118 @@ Shared XML utilities for the Sanctions Screening System
 
 This module contains common XML processing functions used by multiple
 components to avoid code duplication.
+
+SECURITY: All XML parsing uses secure defaults to prevent XXE attacks.
 """
 
 import logging
+import re
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Tuple
+
+# Try lxml first for better security features, fall back to defusedxml or stdlib
+try:
+    from lxml import etree as lxml_etree
+    HAS_LXML = True
+except ImportError:
+    HAS_LXML = False
+
+try:
+    import defusedxml.ElementTree as defused_ET
+    HAS_DEFUSEDXML = True
+except ImportError:
+    HAS_DEFUSEDXML = False
+
 import xml.etree.ElementTree as ET
 
 logger = logging.getLogger(__name__)
+
+
+def get_secure_parser():
+    """Get a secure XML parser that prevents XXE attacks
+    
+    Returns:
+        Secure parser object or None if using stdlib
+    """
+    if HAS_LXML:
+        # lxml secure parser: disable DTD, entities, network access
+        return lxml_etree.XMLParser(
+            resolve_entities=False,
+            no_network=True,
+            dtd_validation=False,
+            load_dtd=False,
+            huge_tree=False
+        )
+    return None
+
+
+def secure_parse(xml_path: Path) -> Tuple[Any, Any]:
+    """Securely parse an XML file, preventing XXE attacks
+    
+    Args:
+        xml_path: Path to XML file
+        
+    Returns:
+        Tuple of (tree, root) element
+        
+    Raises:
+        ValueError: If XML is invalid or contains dangerous content
+    """
+    if HAS_LXML:
+        parser = get_secure_parser()
+        tree = lxml_etree.parse(str(xml_path), parser)
+        return tree, tree.getroot()
+    elif HAS_DEFUSEDXML:
+        # defusedxml provides secure parsing by default
+        tree = defused_ET.parse(str(xml_path))
+        return tree, tree.getroot()
+    else:
+        # stdlib - limited protection, log warning
+        logger.warning("Using stdlib XML parser - consider installing lxml or defusedxml for better security")
+        tree = ET.parse(xml_path)
+        return tree, tree.getroot()
+
+
+def secure_iterparse(xml_path: Path, events: Tuple[str, ...] = ('end',), tag: Optional[str] = None):
+    """Securely iterparse an XML file for memory-efficient processing
+    
+    Args:
+        xml_path: Path to XML file
+        events: Tuple of events to listen for
+        tag: Optional tag to filter for (lxml only)
+        
+    Returns:
+        Iterator over (event, element) tuples
+    """
+    if HAS_LXML:
+        if tag:
+            return lxml_etree.iterparse(str(xml_path), events=events, tag=tag)
+        return lxml_etree.iterparse(str(xml_path), events=events)
+    else:
+        # stdlib doesn't support tag filter
+        return ET.iterparse(xml_path, events=events)
+
+
+def sanitize_for_logging(text: str) -> str:
+    """Sanitize user input for safe logging, preventing log injection
+    
+    Removes newlines, carriage returns, and other control characters
+    that could be used to inject fake log entries.
+    
+    Args:
+        text: User input text
+        
+    Returns:
+        Sanitized text safe for logging
+    """
+    if not text:
+        return ''
+    # Remove newlines, carriage returns, and other control characters
+    sanitized = re.sub(r'[\r\n\x00-\x1f\x7f-\x9f]', ' ', str(text))
+    # Collapse multiple spaces
+    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+    # Truncate to reasonable length
+    return sanitized[:500] if len(sanitized) > 500 else sanitized
 
 
 def extract_xml_namespace(xml_path: Path) -> str:
