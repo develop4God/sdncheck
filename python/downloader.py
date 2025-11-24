@@ -54,6 +54,7 @@ class Feature:
     """Entity feature (DOB, nationality, vessel ID, etc.)"""
     feature_type: str
     value: str
+    feature_type_id: Optional[str] = None
     reliability: Optional[str] = None
     date_period: Optional[str] = None
     location: Optional[str] = None
@@ -693,13 +694,18 @@ class EnhancedSanctionsDownloader:
         if feature_type_elem is None:
             return None
         
+        # Extract featureTypeId attribute per XSD spec
+        feature_type_id = feature_type_elem.get('featureTypeId')
+        feature_type_text = feature_type_elem.text if feature_type_elem.text else 'Unknown'
+        
         value = ''
         if value_elem is not None and value_elem.text:
             value = value_elem.text.strip()
         
         return Feature(
-            feature_type=feature_type_elem.text,
+            feature_type=feature_type_text,
             value=value,
+            feature_type_id=feature_type_id,
             reliability=self._get_text(elem, f'{ns}reliability')
         )
     
@@ -711,7 +717,8 @@ class EnhancedSanctionsDownloader:
         if related_id_elem is None:
             return None
         
-        related_id = related_id_elem.get('id') or (related_id_elem.text if related_id_elem.text else '')
+        # Use entityId attribute per XSD spec, not 'id'
+        related_id = related_id_elem.get('entityId', '')
         
         return Relationship(
             related_entity_id=related_id,
@@ -838,11 +845,13 @@ class EnhancedSanctionsDownloader:
         if dob:
             entity.date_of_birth = dob
         
-        # Parse nationality
-        nationality = self._get_un_text(elem, 'NATIONALITY/VALUE')
-        if nationality:
-            entity.nationality = nationality
-            entity.countries.append(nationality)
+        # Parse nationality - NATIONALITY element contains VALUE child
+        nationality_elem = elem.find('.//NATIONALITY')
+        if nationality_elem is not None:
+            nationality = self._get_un_text(nationality_elem, 'VALUE')
+            if nationality:
+                entity.nationality = nationality
+                entity.countries.append(nationality)
         
         # Parse identity documents
         for doc in elem.findall('.//INDIVIDUAL_DOCUMENT'):

@@ -403,5 +403,206 @@ class TestMatchResult:
         assert result_dict['recommendation'] == 'MANUAL_REVIEW'
 
 
+class TestOFACXMLParsing:
+    """Tests for OFAC XML parsing with mock data"""
+    
+    def test_parse_identity_documents(self, tmp_path):
+        """Test that identity documents are correctly parsed from OFAC XML structure"""
+        from downloader import EnhancedSanctionsDownloader, IdentityDocument
+        
+        # Create mock OFAC XML with identity documents directly under entity
+        xml_content = '''<?xml version="1.0" encoding="UTF-8"?>
+<sanctions xmlns="https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ENHANCED_XML">
+    <entity id="12345">
+        <entityType>Individual</entityType>
+        <names>
+            <name>
+                <translations>
+                    <translation>
+                        <formattedFullName>John Doe</formattedFullName>
+                    </translation>
+                </translations>
+            </name>
+        </names>
+        <idDocuments>
+            <idDocument>
+                <type>Passport</type>
+                <number>X12345678</number>
+                <issuedByCountry>Panama</issuedByCountry>
+            </idDocument>
+        </idDocuments>
+    </entity>
+</sanctions>'''
+        
+        xml_file = tmp_path / "test_ofac.xml"
+        xml_file.write_text(xml_content)
+        
+        downloader = EnhancedSanctionsDownloader.__new__(EnhancedSanctionsDownloader)
+        downloader._discovered_country_codes = set()
+        downloader._discovered_list_types = set()
+        downloader._namespace = None
+        
+        entities = downloader.parse_ofac_xml(xml_file)
+        
+        assert len(entities) == 1
+        entity = entities[0]
+        assert len(entity.identity_documents) == 1
+        assert entity.identity_documents[0].doc_number == 'X12345678'
+        assert entity.identity_documents[0].doc_type == 'Passport'
+        assert entity.identity_documents[0].issuing_country == 'Panama'
+    
+    def test_parse_features_with_type_id(self, tmp_path):
+        """Test that features extract featureTypeId attribute"""
+        from downloader import EnhancedSanctionsDownloader
+        
+        xml_content = '''<?xml version="1.0" encoding="UTF-8"?>
+<sanctions xmlns="https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ENHANCED_XML">
+    <entity id="12345">
+        <entityType>Individual</entityType>
+        <names>
+            <name>
+                <translations>
+                    <translation>
+                        <formattedFullName>Test Person</formattedFullName>
+                    </translation>
+                </translations>
+            </name>
+        </names>
+        <features>
+            <feature>
+                <type featureTypeId="8">Date of Birth</type>
+                <value>1970-01-01</value>
+            </feature>
+        </features>
+    </entity>
+</sanctions>'''
+        
+        xml_file = tmp_path / "test_ofac.xml"
+        xml_file.write_text(xml_content)
+        
+        downloader = EnhancedSanctionsDownloader.__new__(EnhancedSanctionsDownloader)
+        downloader._discovered_country_codes = set()
+        downloader._discovered_list_types = set()
+        downloader._namespace = None
+        
+        entities = downloader.parse_ofac_xml(xml_file)
+        
+        assert len(entities) == 1
+        entity = entities[0]
+        assert len(entity.features) == 1
+        assert entity.features[0].feature_type == 'Date of Birth'
+        assert entity.features[0].feature_type_id == '8'
+        assert entity.features[0].value == '1970-01-01'
+    
+    def test_parse_relationships_with_entity_id(self, tmp_path):
+        """Test that relationships use entityId attribute"""
+        from downloader import EnhancedSanctionsDownloader
+        
+        xml_content = '''<?xml version="1.0" encoding="UTF-8"?>
+<sanctions xmlns="https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ENHANCED_XML">
+    <entity id="12345">
+        <entityType>Individual</entityType>
+        <names>
+            <name>
+                <translations>
+                    <translation>
+                        <formattedFullName>Test Person</formattedFullName>
+                    </translation>
+                </translations>
+            </name>
+        </names>
+        <relationships>
+            <relationship>
+                <relatedEntity entityId="67890"/>
+                <relationshipType>Associate</relationshipType>
+            </relationship>
+        </relationships>
+    </entity>
+</sanctions>'''
+        
+        xml_file = tmp_path / "test_ofac.xml"
+        xml_file.write_text(xml_content)
+        
+        downloader = EnhancedSanctionsDownloader.__new__(EnhancedSanctionsDownloader)
+        downloader._discovered_country_codes = set()
+        downloader._discovered_list_types = set()
+        downloader._namespace = None
+        
+        entities = downloader.parse_ofac_xml(xml_file)
+        
+        assert len(entities) == 1
+        entity = entities[0]
+        assert len(entity.relationships) == 1
+        assert entity.relationships[0].related_entity_id == '67890'
+        assert entity.relationships[0].relationship_type == 'Associate'
+
+
+class TestUNXMLParsing:
+    """Tests for UN XML parsing with mock data"""
+    
+    def test_parse_nationality_structure(self, tmp_path):
+        """Test that UN nationality is parsed from NATIONALITY/VALUE structure"""
+        from downloader import EnhancedSanctionsDownloader
+        
+        xml_content = '''<?xml version="1.0" encoding="UTF-8"?>
+<CONSOLIDATED_LIST>
+    <INDIVIDUALS>
+        <INDIVIDUAL>
+            <DATAID>123456</DATAID>
+            <FIRST_NAME>Test</FIRST_NAME>
+            <SECOND_NAME>Person</SECOND_NAME>
+            <REFERENCE_NUMBER>QDi.001</REFERENCE_NUMBER>
+            <UN_LIST_TYPE>Al-Qaida</UN_LIST_TYPE>
+            <NATIONALITY>
+                <VALUE>Afghanistan</VALUE>
+            </NATIONALITY>
+        </INDIVIDUAL>
+    </INDIVIDUALS>
+</CONSOLIDATED_LIST>'''
+        
+        xml_file = tmp_path / "test_un.xml"
+        xml_file.write_text(xml_content)
+        
+        downloader = EnhancedSanctionsDownloader.__new__(EnhancedSanctionsDownloader)
+        downloader._discovered_country_codes = set()
+        downloader._discovered_list_types = set()
+        
+        entities = downloader.parse_un_xml(xml_file)
+        
+        assert len(entities) == 1
+        entity = entities[0]
+        assert entity.nationality == 'Afghanistan'
+        assert 'Afghanistan' in entity.countries
+    
+    def test_entity_missing_documents_logged(self, tmp_path):
+        """Test that entities without documents don't cause errors"""
+        from downloader import EnhancedSanctionsDownloader
+        
+        xml_content = '''<?xml version="1.0" encoding="UTF-8"?>
+<CONSOLIDATED_LIST>
+    <INDIVIDUALS>
+        <INDIVIDUAL>
+            <DATAID>123456</DATAID>
+            <FIRST_NAME>Test</FIRST_NAME>
+            <REFERENCE_NUMBER>QDi.001</REFERENCE_NUMBER>
+        </INDIVIDUAL>
+    </INDIVIDUALS>
+</CONSOLIDATED_LIST>'''
+        
+        xml_file = tmp_path / "test_un.xml"
+        xml_file.write_text(xml_content)
+        
+        downloader = EnhancedSanctionsDownloader.__new__(EnhancedSanctionsDownloader)
+        downloader._discovered_country_codes = set()
+        downloader._discovered_list_types = set()
+        
+        entities = downloader.parse_un_xml(xml_file)
+        
+        assert len(entities) == 1
+        entity = entities[0]
+        # Should have empty documents list, not error
+        assert len(entity.identity_documents) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
