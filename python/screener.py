@@ -106,40 +106,127 @@ class ScreeningInput:
 
 
 class InputValidationError(ValueError):
-    """Raised when input validation fails"""
-    pass
+    """Raised when input validation fails
+    
+    Attributes:
+        field: The field that failed validation
+        code: Error code for programmatic handling
+        message: Human-readable error message
+        suggestion: Optional suggestion for fixing the error
+    """
+    def __init__(self, message: str, field: str = "unknown", code: str = "VALIDATION_ERROR", suggestion: str = ""):
+        self.field = field
+        self.code = code
+        self.suggestion = suggestion
+        super().__init__(message)
 
 
-def validate_screening_input(input_data: ScreeningInput) -> None:
+def validate_screening_input(input_data: ScreeningInput, config: Optional['ConfigManager'] = None) -> None:
     """Validate screening input data for security and correctness
+    
+    Supports international names including Chinese, Arabic, Cyrillic, etc.
+    Validates against blocked characters that could indicate injection attacks.
     
     Args:
         input_data: ScreeningInput to validate
+        config: Optional configuration manager for validation settings
         
     Raises:
-        InputValidationError: If validation fails
+        InputValidationError: If validation fails with detailed error info
     """
-    # Validate name
-    if not input_data.name or len(input_data.name.strip()) < 2:
-        raise InputValidationError("Name must be at least 2 characters")
-    if len(input_data.name) > 200:
-        raise InputValidationError("Name must be 200 characters or less")
-    if not NAME_PATTERN.match(input_data.name):
-        # Log sanitized input for debugging
-        logger.warning("Invalid name format: %s", sanitize_for_logging(input_data.name))
-        raise InputValidationError("Name contains invalid characters")
+    # Get config or use defaults
+    if config is None:
+        config = get_config()
+    
+    iv_config = config.input_validation
+    
+    # Validate name length
+    name = input_data.name or ""
+    name_stripped = name.strip()
+    
+    if len(name_stripped) < iv_config.name_min_length:
+        raise InputValidationError(
+            f"Name too short ({len(name_stripped)} chars, minimum {iv_config.name_min_length}). Example: 'Li'",
+            field="name",
+            code="NAME_TOO_SHORT",
+            suggestion=f"Provide a name with at least {iv_config.name_min_length} characters"
+        )
+    
+    if len(name) > iv_config.name_max_length:
+        raise InputValidationError(
+            f"Name too long ({len(name)} chars, maximum {iv_config.name_max_length})",
+            field="name",
+            code="NAME_TOO_LONG",
+            suggestion=f"Shorten the name to {iv_config.name_max_length} characters or less"
+        )
+    
+    # Check for blocked characters (potential injection attacks)
+    blocked = iv_config.blocked_characters
+    found_blocked = [c for c in name if c in blocked]
+    if found_blocked:
+        # Log security event
+        logger.warning("SECURITY: Blocked characters detected in name input: %s", 
+                      sanitize_for_logging(name))
+        raise InputValidationError(
+            f"Name contains blocked characters: {found_blocked}. Allowed: letters, spaces, hyphens, periods, apostrophes",
+            field="name",
+            code="BLOCKED_CHARACTERS",
+            suggestion="Remove special characters like < > { } [ ] | \\ ; ` $"
+        )
+    
+    # Validate Unicode categories if Unicode is allowed
+    if iv_config.allow_unicode_names:
+        # Allow Unicode letters (any script), spaces, common punctuation
+        for char in name:
+            category = unicodedata.category(char)
+            # L* = letters, Zs = space separator, Pd = dash punctuation, Po = other punctuation
+            # Cc = control chars (blocked), Cs = surrogates (blocked)
+            if category.startswith('C'):  # Control or format characters
+                logger.warning("SECURITY: Control character detected in name: %s", 
+                              sanitize_for_logging(name))
+                raise InputValidationError(
+                    f"Name contains invalid control character (code: {ord(char)})",
+                    field="name",
+                    code="CONTROL_CHARACTER",
+                    suggestion="Remove invisible or control characters from the name"
+                )
+    else:
+        # Strict Latin-only mode
+        if not NAME_PATTERN.match(name):
+            logger.warning("Invalid name format (Latin-only mode): %s", sanitize_for_logging(name))
+            raise InputValidationError(
+                "Name must contain only Latin letters, spaces, hyphens, periods, and apostrophes",
+                field="name",
+                code="INVALID_FORMAT",
+                suggestion="Use Latin characters only (A-Z, a-z, À-ÿ)"
+            )
     
     # Validate DOB if provided
     if input_data.date_of_birth:
         if not DOB_PATTERN.match(input_data.date_of_birth):
-            raise InputValidationError(f"Invalid date format: {input_data.date_of_birth}. Use YYYY, YYYY-MM, or YYYY-MM-DD")
+            raise InputValidationError(
+                f"DOB must be ISO 8601 format. Got: '{input_data.date_of_birth}'. Example: '1980-01-15'",
+                field="date_of_birth",
+                code="INVALID_DOB_FORMAT",
+                suggestion="Use format YYYY, YYYY-MM, or YYYY-MM-DD"
+            )
     
     # Validate document number if provided
     if input_data.document_number:
-        if len(input_data.document_number) > 50:
-            raise InputValidationError("Document number must be 50 characters or less")
+        if len(input_data.document_number) > iv_config.document_max_length:
+            raise InputValidationError(
+                f"Document number too long ({len(input_data.document_number)} chars, maximum {iv_config.document_max_length})",
+                field="document_number",
+                code="DOCUMENT_TOO_LONG",
+                suggestion=f"Shorten to {iv_config.document_max_length} characters or less"
+            )
         if not DOC_NUMBER_PATTERN.match(input_data.document_number):
-            raise InputValidationError("Document number contains invalid characters")
+            raise InputValidationError(
+                "Document number contains invalid characters. Allowed: letters, numbers, spaces, hyphens, periods",
+                field="document_number",
+                code="INVALID_DOCUMENT_FORMAT",
+                suggestion="Use only alphanumeric characters, spaces, hyphens, and periods"
+            )
 
 
 class EnhancedSanctionsScreener:
@@ -605,8 +692,8 @@ class EnhancedSanctionsScreener:
         Raises:
             InputValidationError: If input validation fails
         """
-        # Validate input for security
-        validate_screening_input(input_data)
+        # Validate input for security (pass config for settings)
+        validate_screening_input(input_data, self.config)
         
         # Log search with sanitized input
         logger.info("Searching for: %s", sanitize_for_logging(input_data.name))

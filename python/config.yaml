@@ -41,6 +41,25 @@ matching:
     moderate_match: 70      # Layer 3: Moderate match - needs secondary validation
     low_match: 60           # Layer 4: Low match - manual review
 
+# Input Validation Configuration
+# Controls how user inputs are validated before screening
+input_validation:
+  # Minimum name length in characters
+  name_min_length: 2
+  
+  # Maximum name length in characters
+  name_max_length: 200
+  
+  # Maximum document number length
+  document_max_length: 50
+  
+  # Allow Unicode names (Chinese, Arabic, Cyrillic, etc.)
+  # Set to false to restrict to Latin characters only
+  allow_unicode_names: true
+  
+  # Characters explicitly blocked in names (SQL injection, XSS)
+  blocked_characters: "<>{}[]|\\;`$"
+
 # Data Source Configuration
 data:
   # OFAC SDN Enhanced XML URL

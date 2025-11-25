@@ -70,6 +70,16 @@ class ValidationConfig:
 
 
 @dataclass
+class InputValidationConfig:
+    """Input validation configuration for user-provided data"""
+    name_min_length: int = 2
+    name_max_length: int = 200
+    document_max_length: int = 50
+    allow_unicode_names: bool = True
+    blocked_characters: str = "<>{}[]|\\;`$"
+
+
+@dataclass
 class LoggingConfig:
     """Logging configuration"""
     level: str = "INFO"
@@ -117,6 +127,7 @@ class ConfigManager:
         self.data: DataConfig = DataConfig()
         self.reporting: ReportingConfig = ReportingConfig()
         self.validation: ValidationConfig = ValidationConfig()
+        self.input_validation: InputValidationConfig = InputValidationConfig()
         self.logging: LoggingConfig = LoggingConfig()
         self.performance: PerformanceConfig = PerformanceConfig()
         self.algorithm: AlgorithmConfig = AlgorithmConfig()
@@ -150,6 +161,7 @@ class ConfigManager:
             self._parse_data()
             self._parse_reporting()
             self._parse_validation()
+            self._parse_input_validation()
             self._parse_logging()
             self._parse_performance()
             self._parse_algorithm()
@@ -212,6 +224,17 @@ class ConfigManager:
             abort_on_high_malformation=cfg.get('abort_on_high_malformation', True)
         )
     
+    def _parse_input_validation(self) -> None:
+        """Parse input validation configuration"""
+        cfg = self._raw_config.get('input_validation', {})
+        self.input_validation = InputValidationConfig(
+            name_min_length=cfg.get('name_min_length', 2),
+            name_max_length=cfg.get('name_max_length', 200),
+            document_max_length=cfg.get('document_max_length', 50),
+            allow_unicode_names=cfg.get('allow_unicode_names', True),
+            blocked_characters=cfg.get('blocked_characters', "<>{}[]|\\;`$")
+        )
+    
     def _parse_logging(self) -> None:
         """Parse logging configuration"""
         cfg = self._raw_config.get('logging', {})
@@ -260,6 +283,17 @@ class ConfigManager:
         thresholds = self.reporting.recommendation_thresholds
         if not (thresholds['auto_clear'] < thresholds['manual_review'] < thresholds['auto_escalate']):
             errors.append("Recommendation thresholds must be in ascending order: auto_clear < manual_review < auto_escalate")
+        
+        # Validate input validation config
+        iv = self.input_validation
+        if iv.name_min_length <= 0:
+            errors.append("name_min_length must be greater than 0")
+        if iv.name_max_length <= iv.name_min_length:
+            errors.append("name_max_length must be greater than name_min_length")
+        if iv.name_max_length > 1000:
+            errors.append("name_max_length must be 1000 or less")
+        if iv.document_max_length <= 0:
+            errors.append("document_max_length must be greater than 0")
         
         if errors:
             raise ConfigurationError("Configuration validation failed:\n" + "\n".join(errors))

