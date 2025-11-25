@@ -28,37 +28,8 @@ def upgrade() -> None:
     op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
     op.execute('CREATE EXTENSION IF NOT EXISTS "pg_trgm"')
     
-    # Create enums
-    entity_type = postgresql.ENUM(
-        'individual', 'entity', 'vessel', 'aircraft',
-        name='entity_type', create_type=True
-    )
-    entity_type.create(op.get_bind(), checkfirst=True)
-    
-    data_source_type = postgresql.ENUM(
-        'OFAC', 'UN', 'EU', 'UK', 'OTHER',
-        name='data_source_type', create_type=True
-    )
-    data_source_type.create(op.get_bind(), checkfirst=True)
-    
-    screening_status = postgresql.ENUM(
-        'pending', 'processing', 'completed', 'failed',
-        name='screening_status', create_type=True
-    )
-    screening_status.create(op.get_bind(), checkfirst=True)
-    
-    recommendation_type = postgresql.ENUM(
-        'AUTO_ESCALATE', 'MANUAL_REVIEW', 'LOW_CONFIDENCE_REVIEW', 'AUTO_CLEAR',
-        name='recommendation_type', create_type=True
-    )
-    recommendation_type.create(op.get_bind(), checkfirst=True)
-    
-    audit_action = postgresql.ENUM(
-        'CREATE', 'READ', 'UPDATE', 'DELETE', 'SCREEN', 'BULK_SCREEN',
-        'DATA_UPDATE', 'LOGIN', 'LOGOUT', 'CONFIG_CHANGE',
-        name='audit_action', create_type=True
-    )
-    audit_action.create(op.get_bind(), checkfirst=True)
+    # Create enums safely (avoid duplicate errors)
+        # Los tipos ENUM ya se crean con SQL crudo arriba, solo se referencian en las columnas
     
     # Create sanctioned_entities table
     op.create_table(

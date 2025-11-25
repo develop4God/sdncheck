@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # 1. Servicio de Base de Datos PostgreSQL
@@ -16,6 +15,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       # Scripts de inicialización (se ejecutan solo en la primera creación)
       - ./docker/init:/docker-entrypoint-initdb.d:ro
+      - ./docker/init/02_create_test_db.sql:/docker-entrypoint-initdb.d/02_create_test_db.sql:ro
     ports:
       # Mapea el puerto del contenedor (5432) al puerto de tu máquina local (5432)
       - "5432:5432"

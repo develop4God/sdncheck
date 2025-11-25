@@ -5,9 +5,14 @@
 -- This script creates the complete database schema
 -- for the SDNCheck Sanctions Screening System.
 -- 
--- Run this script on a fresh PostgreSQL database
--- or use with docker-compose init scripts.
--- ============================================
+
+-- Create test database if not exists (run as postgres)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'sdn_test_database') THEN
+        CREATE DATABASE sdn_test_database OWNER sdn_user;
+    END IF;
+END$$;
 
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

@@ -117,7 +117,7 @@ class SanctionedEntityRepository:
         )
         
         result = self.session.execute(query)
-        return result.scalar_one_or_none()
+        return result.unique().scalar_one_or_none()
     
     def get_by_external_id(
         self, 
@@ -142,7 +142,7 @@ class SanctionedEntityRepository:
             )
         )
         result = self.session.execute(query)
-        return result.scalar_one_or_none()
+        return result.unique().scalar_one_or_none()
     
     def search_by_name(
         self,
@@ -541,7 +541,7 @@ class ScreeningRepository:
         """
         query = select(ScreeningRequest).where(ScreeningRequest.id == request_id)
         result = self.session.execute(query)
-        request = result.scalar_one_or_none()
+        request = result.unique().scalar_one_or_none()
         
         if not request:
             raise EntityNotFoundError(f"Request not found: {request_id}")
@@ -578,7 +578,7 @@ class ScreeningRepository:
         """
         query = select(ScreeningRequest).where(ScreeningRequest.id == request_id)
         result = self.session.execute(query)
-        request = result.scalar_one_or_none()
+        request = result.unique().scalar_one_or_none()
         
         if not request:
             raise EntityNotFoundError(f"Request not found: {request_id}")
@@ -608,7 +608,7 @@ class ScreeningRepository:
         )
         
         result = self.session.execute(query)
-        return result.scalar_one_or_none()
+        return result.unique().scalar_one_or_none()
     
     def get_screening_stats(
         self,
