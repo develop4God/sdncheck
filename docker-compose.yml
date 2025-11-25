@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  # 1. Servicio de Base de Datos PostgreSQL
+  db:
+    image: postgres:15-alpine
+    container_name: sdncheck_postgres
+    restart: always
+    environment:
+      # Credenciales para desarrollo (cámbialas en producción)
+      POSTGRES_USER: sdn_user
+      POSTGRES_PASSWORD: sdn_password
+      POSTGRES_DB: sdn_database
+    volumes:
+      # Mantiene los datos persistentes incluso si el contenedor se elimina
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Mapea el puerto del contenedor (5432) al puerto de tu máquina local (5432)
+      - "5432:5432"
+
+volumes:
+  # Define el volumen persistente
+  postgres_data:
