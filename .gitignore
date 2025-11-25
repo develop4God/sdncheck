@@ -1,3 +1,5 @@
+# Carpeta de reportes (no subir a GitHub)
+python/reports/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

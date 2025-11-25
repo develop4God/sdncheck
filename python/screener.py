@@ -262,9 +262,11 @@ class EnhancedSanctionsScreener:
         for name in self.config.matching.common_names:
             self._common_names.add(self._normalize_name(name))
         
-        # Audit log and reports directory
-        self.reports_dir = Path("audit_log")
+        # Reports directory
+        self.reports_dir = Path("reports")
         self.reports_dir.mkdir(exist_ok=True)
+        # Audit log subdirectory
+        (self.reports_dir / "audit_log").mkdir(exist_ok=True)
         
         # Screening history for audit trail (with size limit to prevent memory issues)
         self.screening_history: List[Dict[str, Any]] = []

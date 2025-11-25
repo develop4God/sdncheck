@@ -1,3 +1,58 @@
+def generate_auditlog_html(audit_log_path=None, output_path=None):
+    """Genera un reporte HTML visualizando el audit log"""
+    import json
+    from pathlib import Path
+    audit_log_path = audit_log_path or Path("reports/audit_log/screening_audit.log")
+    output_path = output_path or Path("reports/audit_log/auditlog_report.html")
+    entries = []
+    if Path(audit_log_path).exists():
+        with open(audit_log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        entries.append(json.loads(line))
+                    except Exception:
+                        pass
+    html = """
+    <html>
+    <head>
+        <title>Audit Log Report</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 2em; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #ccc; padding: 8px; }
+            th { background: #eee; }
+        </style>
+    </head>
+    <body>
+        <h2>Audit Log Report</h2>
+        <table>
+            <tr>
+                <th>Timestamp</th>
+                <th>Screening ID</th>
+                <th>Name</th>
+                <th>Document</th>
+                <th>Country</th>
+                <th>Is Hit</th>
+                <th>Decision</th>
+            </tr>
+    """
+    for entry in entries:
+        html += f"<tr><td>{entry.get('timestamp','')}</td>"
+        html += f"<td>{entry.get('screening_id','')}</td>"
+        html += f"<td>{entry.get('input',{}).get('name','')}</td>"
+        html += f"<td>{entry.get('input',{}).get('document','')}</td>"
+        html += f"<td>{entry.get('input',{}).get('country','')}</td>"
+        html += f"<td>{'✔️' if entry.get('is_hit',False) else ''}</td>"
+        html += f"<td>{entry.get('decision','')}</td></tr>"
+    html += """
+        </table>
+    </body>
+    </html>
+    """
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    return str(output_path)
 """
 Enhanced Report Generation System v2.0
 Generates official screening reports with comprehensive metadata and audit trail
@@ -362,7 +417,7 @@ class ReportValidator:
 class ConstanciaReportGenerator:
     """Enhanced report generator with validation and audit trail"""
     
-    def __init__(self, output_dir: Path = Path("audit_log"), 
+    def __init__(self, output_dir: Path = Path("reports"), 
                  data_dir: Path = Path("sanctions_data"),
                  validate_before_generate: bool = True):
         self.output_dir = Path(output_dir)
@@ -370,9 +425,9 @@ class ConstanciaReportGenerator:
         self.metadata_collector = ReportMetadataCollector(data_dir)
         self.validator = ReportValidator()
         self.validate_before_generate = validate_before_generate
-        
-        # Audit log file (append-only)
-        self.audit_log_path = self.output_dir / "screening_audit.log"
+        # Audit log file (append-only) en reports/audit_log
+        self.audit_log_path = self.output_dir / "audit_log" / "screening_audit.log"
+        (self.output_dir / "audit_log").mkdir(exist_ok=True)
     
     def _log_audit(self, result: ScreeningResult, list_metadata: List[ListMetadata]) -> None:
         """Write immutable audit log entry"""
@@ -871,7 +926,7 @@ class ConstanciaReportGenerator:
 class AuditTrailManager:
     """Manages immutable audit trail for all screenings"""
     
-    def __init__(self, audit_dir: Path = Path("audit_log")):
+    def __init__(self, audit_dir: Path = Path("reports/audit_log")):
         self.audit_dir = Path(audit_dir)
         self.audit_dir.mkdir(exist_ok=True)
         self.audit_file = self.audit_dir / "screening_audit.jsonl"
