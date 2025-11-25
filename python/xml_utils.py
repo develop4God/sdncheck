@@ -98,8 +98,9 @@ def secure_iterparse(xml_path: Path, events: Tuple[str, ...] = ('end',), tag: Op
 def sanitize_for_logging(text: str) -> str:
     """Sanitize user input for safe logging, preventing log injection
     
-    Removes newlines, carriage returns, and other control characters
-    that could be used to inject fake log entries.
+    Removes newlines, carriage returns, control characters, and
+    Unicode formatting characters that could be used to inject 
+    fake log entries or hide malicious content.
     
     Args:
         text: User input text
@@ -109,8 +110,12 @@ def sanitize_for_logging(text: str) -> str:
     """
     if not text:
         return ''
-    # Remove newlines, carriage returns, and other control characters
+    # Remove newlines, carriage returns, and other control characters (C0, C1)
     sanitized = re.sub(r'[\r\n\x00-\x1f\x7f-\x9f]', ' ', str(text))
+    # Remove Unicode formatting characters (zero-width, BOM, line/paragraph separators)
+    # \u200B = zero-width space, \uFEFF = BOM, \u2028 = line separator, \u2029 = paragraph separator
+    # \u200C-\u200F = various zero-width and direction markers
+    sanitized = re.sub(r'[\u200B-\u200F\u2028\u2029\uFEFF]', '', sanitized)
     # Collapse multiple spaces
     sanitized = re.sub(r'\s+', ' ', sanitized).strip()
     # Truncate to reasonable length
