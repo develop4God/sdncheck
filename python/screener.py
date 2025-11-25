@@ -767,9 +767,9 @@ class EnhancedSanctionsScreener:
                     entity['dateOfBirth']
                 )
             
-            # Calculate nationality score
-            nat_score = 0.0
-            nat_mismatch = False
+            # Nationality check - INFORMATIONAL FLAG ONLY (non-scoring)
+            # This data point is solely for human review/analysis; it does NOT affect the score
+            nat_flag = None  # Will be set to appropriate flag if match found
             if input_data.nationality or input_data.country:
                 input_countries = []
                 if input_data.nationality:
@@ -790,41 +790,53 @@ class EnhancedSanctionsScreener:
                 input_countries_set = set(input_countries)
                 if input_countries_set & entity_countries:
                     # Exact match found via set intersection
-                    nat_score = 100.0
+                    nat_flag = 'NATIONALITY_EXACT_MATCH_INFO'
                 elif entity_countries:
-                    # Check for substring matches only if no exact match
+                    # Check for meaningful substring matches only if no exact match
+                    # Avoid false positives like USA matching JERUSALEM
+                    # A substring match is only valid if:
+                    # 1. The shorter string is at least 4 chars (to avoid false positives)
+                    # 2. One is a prefix or suffix of the other (not just contained)
                     found_substring = False
                     for ic in input_countries:
                         for ec in entity_countries:
-                            if ic in ec or ec in ic:
-                                found_substring = True
-                                break
+                            # Only consider substring matches for longer country names
+                            # This avoids "USA" matching "JERUSALEM" (false positive)
+                            min_len = min(len(ic), len(ec))
+                            if min_len >= 4:  # Minimum length for substring match
+                                # Check if one starts with or ends with the other
+                                if ec.startswith(ic) or ec.endswith(ic):
+                                    found_substring = True
+                                    break
+                                if ic.startswith(ec) or ic.endswith(ec):
+                                    found_substring = True
+                                    break
                         if found_substring:
                             break
                     if found_substring:
-                        nat_score = 100.0
-                    else:
-                        # Nationality provided but no match - potential mismatch
-                        nat_mismatch = True
+                        nat_flag = 'NATIONALITY_SUBSTRING_MATCH_INFO'
+                    # NOTE: No penalty for nationality mismatch - this is informational only
             
             # Calculate overall score using weights
+            # NOTE: nationality is now INFORMATIONAL ONLY and excluded from scoring
+            # The weighted sum maintains consistency with original formula (without nat_score component)
             overall = (
                 best_name_score * weights['name'] +
                 doc_score * weights['document'] +
-                dob_score * weights['dob'] +
-                nat_score * weights['nationality']
+                dob_score * weights['dob']
+                # nationality weight removed - it's informational only
             )
-            
-            # Apply nationality coherence adjustment
-            if nat_mismatch:
-                overall -= 5  # Reduce score by 5 points for nationality mismatch
+            # Note: With current weights (0.40 + 0.30 + 0.15 = 0.85), 
+            # max possible score is 85. This is intentional - the remaining
+            # 0.15 weight (0.10 nationality + 0.05 address) represents fields
+            # that are informational-only or not used in scoring.
             
             confidence = ConfidenceBreakdown(
                 overall=max(0, min(100, overall)),
                 name_score=best_name_score,
                 document_score=doc_score,
                 dob_score=dob_score,
-                nationality_score=nat_score
+                nationality_score=0.0  # Not used for scoring anymore
             )
             
             # Determine layer and flags
@@ -835,7 +847,7 @@ class EnhancedSanctionsScreener:
                 layer = 1
                 flags.append('DOCUMENT_MATCH')
             elif best_name_score >= layers['high_confidence']:
-                if nat_score > 0 or dob_score >= 60:
+                if nat_flag or dob_score >= 60:
                     layer = 2
                 else:
                     layer = 3
@@ -849,8 +861,9 @@ class EnhancedSanctionsScreener:
                 flags.append('SHORT_NAME_QUERY')
             if is_common:
                 flags.append('COMMON_NAME')
-            if nat_mismatch:
-                flags.append('NATIONALITY_MISMATCH')
+            # Add nationality info flag if match found (informational only)
+            if nat_flag:
+                flags.append(nat_flag)
             if doc_score == 0 and input_data.document_number:
                 flags.append('NO_DOCUMENT_MATCH')
             if entity.get('type') == 'entity':

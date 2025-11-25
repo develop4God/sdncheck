@@ -165,6 +165,52 @@ class SecurityLogger:
             return sanitized[:max_length] + "...(truncated)"
         return sanitized
     
+    def _sanitize_context(self, context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Sanitize all values in a context dictionary for safe logging
+        
+        Prevents JSON injection by sanitizing all string values in the dict.
+        Non-string values are converted to strings and sanitized.
+        
+        Args:
+            context: Dictionary with context data
+            
+        Returns:
+            Sanitized dictionary safe for JSON logging
+        """
+        if not context:
+            return {}
+        
+        sanitized = {}
+        for key, value in context.items():
+            # Sanitize the key as well (defense in depth)
+            safe_key = self._sanitize_input(str(key), max_length=100) if key else "unknown"
+            
+            # Sanitize the value
+            if value is None:
+                sanitized[safe_key] = None
+            elif isinstance(value, bool):
+                sanitized[safe_key] = value
+            elif isinstance(value, (int, float)):
+                sanitized[safe_key] = value
+            elif isinstance(value, str):
+                sanitized[safe_key] = self._sanitize_input(value, max_length=200)
+            elif isinstance(value, dict):
+                # Recursively sanitize nested dicts
+                sanitized[safe_key] = self._sanitize_context(value)
+            elif isinstance(value, (list, tuple)):
+                # Sanitize list/tuple items
+                sanitized[safe_key] = [
+                    self._sanitize_input(str(item), max_length=200) if isinstance(item, str)
+                    else item if isinstance(item, (bool, int, float, type(None)))
+                    else self._sanitize_input(str(item), max_length=200)
+                    for item in value
+                ]
+            else:
+                # For other types, convert to string and sanitize
+                sanitized[safe_key] = self._sanitize_input(str(value), max_length=200)
+        
+        return sanitized
+    
     def log_validation_failure(
         self,
         field: str,
@@ -180,7 +226,7 @@ class SecurityLogger:
             error_code: Error code for the failure
             input_value: The input that failed (will be sanitized)
             source: Source module/function
-            additional_context: Additional context data
+            additional_context: Additional context data (will be sanitized)
         """
         event = SecurityEvent(
             event_type="VALIDATION_FAILED",
@@ -192,7 +238,7 @@ class SecurityLogger:
             request_id=self._request_id,
             user_id=self._user_id,
             source_ip=self._source_ip,
-            additional_context=additional_context or {}
+            additional_context=self._sanitize_context(additional_context)
         )
         
         self.logger.warning(event.to_json())
@@ -218,9 +264,10 @@ class SecurityLogger:
             input_value: Suspicious input (will be sanitized)
             source: Source module/function
             blocked: Whether the attempt was blocked
-            additional_context: Additional context
+            additional_context: Additional context (will be sanitized)
         """
-        context = additional_context or {}
+        # Sanitize context first, then add blocked status
+        context = self._sanitize_context(additional_context)
         context['blocked'] = blocked
         
         event = SecurityEvent(
