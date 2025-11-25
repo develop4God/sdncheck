@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Reporte de Auditoría de Screening</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f8f9fa; margin: 0; padding: 0; }
+        .container { max-width: 1100px; margin: 30px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #ccc; padding: 30px; }
+        h1 { text-align: center; color: #2c3e50; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 10px; border-bottom: 1px solid #e1e1e1; text-align: left; }
+        th { background: #34495e; color: #fff; }
+        tr.hit { background: #ffe6e6; }
+        tr.clear { background: #eafaf1; }
+        .badge { padding: 4px 10px; border-radius: 4px; font-weight: bold; }
+        .badge-hit { background: #e74c3c; color: #fff; }
+        .badge-clear { background: #27ae60; color: #fff; }
+        .audit-id { font-size: 0.95em; color: #7f8c8d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Reporte de Auditoría de Screening</h1>
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha/Hora</th>
+                    <th>Nombre</th>
+                    <th>Identificación</th>
+                    <th>Resultado</th>
+                    <th>Coincidencias</th>
+                    <th>Operador</th>
+                    <th>ID Auditoría</th>
+                </tr>
+            </thead>
+            <tbody>
+            <!-- AUDIT LOG ROWS -->
+            <!-- Will be filled by script below -->
+            </tbody>
+        </table>
+    </div>
+    <script>
+    // Audit log data (embedded for static HTML)
+    fetch('auditlog.log')
+      .then(response => response.text())
+      .then(text => {
+        const lines = text.trim().split('\n');
+        const auditLog = lines.map(line => JSON.parse(line));
+        const tbody = document.querySelector('tbody');
+        auditLog.forEach(entry => {
+            const tr = document.createElement('tr');
+            tr.className = entry.is_hit ? 'hit' : 'clear';
+            tr.innerHTML = `
+                <td>${new Date(entry.timestamp).toLocaleString('es-ES', { hour12: false })}</td>
+                <td>${entry.input.name}</td>
+                <td>${entry.input.document || 'No Ingresado'}</td>
+                <td><span class="badge ${entry.is_hit ? 'badge-hit' : 'badge-clear'}">${entry.is_hit ? 'COINCIDENCIA' : 'LIMPIO'}</span></td>
+                <td>${entry.match_count}</td>
+                <td>${entry.operator || 'N/A'}</td>
+                <td class="audit-id">${entry.screening_id}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+      });
+    </script>
+</body>
+</html>

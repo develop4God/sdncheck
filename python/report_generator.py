@@ -362,7 +362,7 @@ class ReportValidator:
 class ConstanciaReportGenerator:
     """Enhanced report generator with validation and audit trail"""
     
-    def __init__(self, output_dir: Path = Path("reports"), 
+    def __init__(self, output_dir: Path = Path("audit_log"), 
                  data_dir: Path = Path("sanctions_data"),
                  validate_before_generate: bool = True):
         self.output_dir = Path(output_dir)
@@ -871,7 +871,7 @@ class ConstanciaReportGenerator:
 class AuditTrailManager:
     """Manages immutable audit trail for all screenings"""
     
-    def __init__(self, audit_dir: Path = Path("reports")):
+    def __init__(self, audit_dir: Path = Path("audit_log")):
         self.audit_dir = Path(audit_dir)
         self.audit_dir.mkdir(exist_ok=True)
         self.audit_file = self.audit_dir / "screening_audit.jsonl"
