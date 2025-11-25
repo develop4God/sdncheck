@@ -24,6 +24,9 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any, Tuple
 from dataclasses import dataclass, field
 
+# PostgreSQL connection for testing
+import psycopg2
+
 from rapidfuzz import fuzz
 
 # Try to import lxml for better XML parsing
@@ -242,10 +245,8 @@ def validate_screening_input(input_data: ScreeningInput, config: Optional['Confi
 
 class EnhancedSanctionsScreener:
     """Enhanced screener with multi-layer matching and comprehensive validation"""
-    
     def __init__(self, config: Optional[ConfigManager] = None, data_dir: str = "sanctions_data"):
         """Initialize screener
-        
         Args:
             config: Configuration manager instance
             data_dir: Directory containing sanctions data files
@@ -253,12 +254,39 @@ class EnhancedSanctionsScreener:
         self.config = config or get_config()
         self.data_dir = Path(data_dir)
         self.entities: List[Dict[str, Any]] = []
-        
         # Document index for fast lookup
         self._document_index: Dict[str, List[Dict[str, Any]]] = {}
-        
         # Common names set (normalized)
         self._common_names: set = set()
+        # Screening history for audit trail (with size limit to prevent memory issues)
+        self.screening_history: List[Dict[str, Any]] = []
+        self._max_history_size = 10000  # Limit to prevent memory issues in long-running apps
+        # Reports directory for saving reports
+        self.reports_dir = Path(self.config.reporting.output_directory)
+        self.reports_dir.mkdir(exist_ok=True)
+
+    @staticmethod
+    def test_postgres_connection():
+        """Test connection to PostgreSQL using config.yaml parameters"""
+        config = get_config()
+        db = config.database
+        try:
+            conn = psycopg2.connect(
+                host=db.host,
+                port=db.port,
+                user=db.user,
+                password=db.password,
+                dbname=db.name
+            )
+            cur = conn.cursor()
+            cur.execute("SELECT 1;")
+            result = cur.fetchone()
+            conn.close()
+            print(f"✅ Conexión exitosa a PostgreSQL ({db.host}:{db.port}) - Resultado: {result}")
+            return True
+        except Exception as e:
+            print(f"❌ Error de conexión a PostgreSQL: {e}")
+            return False
         for name in self.config.matching.common_names:
             self._common_names.add(self._normalize_name(name))
         
@@ -1271,6 +1299,7 @@ def main():
             analyst=None,
             generate_individual_reports=True
         )
+        EnhancedSanctionsScreener.test_postgres_connection()
 
 
 if __name__ == "__main__":

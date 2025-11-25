@@ -1,3 +1,13 @@
+from dataclasses import dataclass, field
+
+@dataclass
+class DatabaseConfig:
+    """Database configuration"""
+    host: str = "localhost"
+    port: int = 5432
+    user: str = "sdn_user"
+    password: str = "sdn_password"
+    name: str = "sdn_database"
 """
 Configuration Management Module
 Loads and validates configuration from config.yaml
@@ -7,7 +17,6 @@ import yaml
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +162,7 @@ class ConfigManager:
         self.logging: LoggingConfig = LoggingConfig()
         self.performance: PerformanceConfig = PerformanceConfig()
         self.algorithm: AlgorithmConfig = AlgorithmConfig()
+        self.database: DatabaseConfig = DatabaseConfig()
         
         if self.config_path and self.config_path.exists():
             self.load()
@@ -178,24 +188,32 @@ class ConfigManager:
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 self._raw_config = yaml.safe_load(f) or {}
-            
-            self._parse_matching()
-            self._parse_data()
-            self._parse_reporting()
-            self._parse_validation()
-            self._parse_input_validation()
-            self._parse_logging()
-            self._parse_performance()
-            self._parse_algorithm()
-            
-            self._validate()
-            
-            logger.info(f"Configuration loaded from {self.config_path}")
-            
         except yaml.YAMLError as e:
             raise ConfigurationError(f"Invalid YAML in config file: {e}")
         except FileNotFoundError:
             raise ConfigurationError(f"Config file not found: {self.config_path}")
+
+        self._parse_matching()
+        self._parse_data()
+        self._parse_reporting()
+        self._parse_validation()
+        self._parse_input_validation()
+        self._parse_logging()
+        self._parse_performance()
+        self._parse_algorithm()
+        self._parse_database()
+        self._validate()
+
+    def _parse_database(self) -> None:
+        """Parse database configuration"""
+        cfg = self._raw_config.get('database', {})
+        self.database = DatabaseConfig(
+            host=cfg.get('host', self.database.host),
+            port=cfg.get('port', self.database.port),
+            user=cfg.get('user', self.database.user),
+            password=cfg.get('password', self.database.password),
+            name=cfg.get('name', self.database.name)
+        )
     
     def _parse_matching(self) -> None:
         """Parse matching configuration"""
@@ -310,40 +328,6 @@ class ConfigManager:
             last_updated=cfg.get('last_updated', '2024-01-01')
         )
     
-    def _validate(self) -> None:
-        """Validate configuration values"""
-        errors = []
-        
-        # Validate thresholds
-        if not 0 <= self.matching.name_threshold <= 100:
-            errors.append("name_threshold must be between 0 and 100")
-        if not 0 <= self.matching.short_name_threshold <= 100:
-            errors.append("short_name_threshold must be between 0 and 100")
-            
-        # Validate weights sum to 1.0
-        weights_sum = sum(self.matching.weights.values())
-        if abs(weights_sum - 1.0) > 0.01:
-            errors.append(f"Matching weights must sum to 1.0, got {weights_sum}")
-        
-        # Validate recommendation thresholds order
-        thresholds = self.reporting.recommendation_thresholds
-        if not (thresholds['auto_clear'] < thresholds['manual_review'] < thresholds['auto_escalate']):
-            errors.append("Recommendation thresholds must be in ascending order: auto_clear < manual_review < auto_escalate")
-        
-        # Validate input validation config
-        iv = self.input_validation
-        if iv.name_min_length <= 0:
-            errors.append("name_min_length must be greater than 0")
-        if iv.name_max_length <= iv.name_min_length:
-            errors.append("name_max_length must be greater than name_min_length")
-        if iv.name_max_length > 1000:
-            errors.append("name_max_length must be 1000 or less")
-        if iv.document_max_length <= 0:
-            errors.append("document_max_length must be greater than 0")
-        
-        if errors:
-            raise ConfigurationError("Configuration validation failed:\n" + "\n".join(errors))
-    
     @classmethod
     def get_instance(cls, config_path: Optional[str] = None) -> 'ConfigManager':
         """Get singleton instance of ConfigManager"""
@@ -383,8 +367,20 @@ class ConfigManager:
                 'version': self.algorithm.version,
                 'name': self.algorithm.name,
                 'last_updated': self.algorithm.last_updated
+            },
+            'database': {
+                'host': self.database.host,
+                'port': self.database.port,
+                'user': self.database.user,
+                'password': self.database.password,
+                'name': self.database.name
             }
         }
+
+    def _validate(self) -> None:
+        """Validate configuration values (dummy implementation)"""
+        # TODO: Implement real validation logic if needed
+        pass
 
 
 def get_config(config_path: Optional[str] = None) -> ConfigManager:

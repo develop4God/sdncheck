@@ -182,3 +182,11 @@ algorithm:
   version: "2.0.0"
   name: "Multi-Layer Fuzzy Matcher"
   last_updated: "2024-01-01"
+
+# Database Configuration
+database:
+  host: localhost
+  port: 5432
+  user: sdn_user
+  password: sdn_password
+  name: sdn_database
