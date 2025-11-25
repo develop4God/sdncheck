@@ -9,7 +9,6 @@ Usage:
 """
 
 import os
-import sys
 import time
 import uuid
 import logging
@@ -20,10 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Security
+from fastapi.security import APIKeyHeader
 
 from api.models import (
     ScreeningRequest,
@@ -63,6 +60,7 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 DATA_DIR = os.getenv("DATA_DIR", "sanctions_data")
 MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "10"))
 CONFIG_PATH = os.getenv("CONFIG_PATH", "config.yaml")
+API_KEY = os.getenv("API_KEY", "")  # Required for authenticated endpoints
 
 # Global state
 _screener: Optional[EnhancedSanctionsScreener] = None
@@ -70,6 +68,33 @@ _config: Optional[ConfigManager] = None
 _startup_time: Optional[datetime] = None
 _screener_lock = asyncio.Lock()  # Lock for atomic screener updates
 _executor = ThreadPoolExecutor(max_workers=2)  # For blocking I/O operations
+
+# API Key security scheme
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> str:
+    """Verify API key for protected endpoints.
+    
+    If API_KEY environment variable is not set, authentication is disabled.
+    """
+    if not API_KEY:
+        # API key not configured - allow all requests (development mode)
+        return "dev-mode"
+    
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Provide X-API-Key header."
+        )
+    
+    if api_key != API_KEY:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API key"
+        )
+    
+    return api_key
 
 
 def get_screener() -> EnhancedSanctionsScreener:
@@ -205,6 +230,8 @@ def _transform_match_to_response(match_dict: dict) -> MatchDetail:
     response_model=ScreeningResponse,
     responses={
         200: {"model": ScreeningResponse, "description": "Screening completed successfully"},
+        401: {"model": ErrorResponse, "description": "Missing API key"},
+        403: {"model": ErrorResponse, "description": "Invalid API key"},
         422: {"model": ErrorResponse, "description": "Validation error"},
         500: {"model": ErrorResponse, "description": "Internal server error"}
     },
@@ -213,11 +240,13 @@ def _transform_match_to_response(match_dict: dict) -> MatchDetail:
 )
 async def screen_individual(
     request: ScreeningRequest,
-    screener: EnhancedSanctionsScreener = Depends(get_screener)
+    screener: EnhancedSanctionsScreener = Depends(get_screener),
+    api_key: str = Depends(verify_api_key)
 ):
     """Screen an individual against sanctions lists.
     
     This endpoint validates input, calls the screener, and returns matches.
+    Requires API key authentication via X-API-Key header.
     """
     start_time = time.time()
     
@@ -271,6 +300,8 @@ async def screen_individual(
     responses={
         200: {"model": BulkScreeningResponse, "description": "Bulk screening completed"},
         400: {"model": ErrorResponse, "description": "Invalid CSV format"},
+        401: {"model": ErrorResponse, "description": "Missing API key"},
+        403: {"model": ErrorResponse, "description": "Invalid API key"},
         413: {"model": ErrorResponse, "description": "File too large"},
         500: {"model": ErrorResponse, "description": "Internal server error"}
     },
@@ -279,12 +310,14 @@ async def screen_individual(
 )
 async def bulk_screen(
     file: UploadFile = File(..., description="CSV file with columns: nombre, cedula, pais"),
-    screener: EnhancedSanctionsScreener = Depends(get_screener)
+    screener: EnhancedSanctionsScreener = Depends(get_screener),
+    api_key: str = Depends(verify_api_key)
 ):
     """Bulk screen individuals from a CSV file.
     
     The CSV must have headers: nombre (name), cedula (document), pais (country).
     Streams file directly to disk to avoid memory issues with large files.
+    Requires API key authentication via X-API-Key header.
     """
     start_time = time.time()
     screening_id = str(uuid.uuid4())
@@ -304,29 +337,45 @@ async def bulk_screen(
     temp_path = None
     
     try:
-        # Create temp directory
+        # Create temp directory with secure path
         temp_dir = Path(tempfile.gettempdir()) / "sanctions_bulk"
         temp_dir.mkdir(exist_ok=True)
         temp_path = temp_dir / f"{screening_id}.csv"
         
+        # Validate path is within temp_dir (prevent path traversal)
+        resolved_path = temp_path.resolve()
+        if not resolved_path.is_relative_to(temp_dir.resolve()):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file path"
+            )
+        
         # Stream file directly to disk to avoid memory accumulation
         total_size = 0
-        with open(temp_path, 'wb') as f:
+        file_handle = None
+        try:
+            file_handle = open(temp_path, 'wb')
             while True:
                 chunk = await file.read(8192)  # Read 8KB at a time
                 if not chunk:
                     break
                 total_size += len(chunk)
                 if total_size > max_size_bytes:
-                    # Clean up partial file before raising
-                    f.close()
-                    if temp_path.exists():
+                    # Immediately cleanup partial file on size exceeded
+                    file_handle.close()
+                    file_handle = None
+                    try:
                         temp_path.unlink()
+                    except OSError:
+                        pass
                     raise HTTPException(
                         status_code=413,
                         detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE_MB}MB"
                     )
-                f.write(chunk)
+                file_handle.write(chunk)
+        finally:
+            if file_handle is not None:
+                file_handle.close()
         
         # Validate CSV headers
         import csv
@@ -381,20 +430,15 @@ async def bulk_screen(
         )
         
     finally:
-        # Cleanup temp file with retry logic
+        # Simple and robust temp file cleanup
         if temp_path and temp_path.exists():
-            for attempt in range(3):
-                try:
-                    temp_path.unlink()
-                    break
-                except Exception as e:
-                    if attempt == 2:  # Last attempt
-                        logger.error(
-                            "Failed to cleanup temp file after 3 attempts: path=%s error=%s",
-                            temp_path, e
-                        )
-                    else:
-                        await asyncio.sleep(0.1)  # Brief delay before retry
+            try:
+                temp_path.unlink()
+            except OSError as e:
+                logger.error(
+                    "Failed to cleanup temp file: path=%s error=%s",
+                    temp_path, e
+                )
 
 
 @app.get(
@@ -473,18 +517,22 @@ async def health_check(
     response_model=DataUpdateResponse,
     responses={
         200: {"model": DataUpdateResponse, "description": "Data updated successfully"},
+        401: {"model": ErrorResponse, "description": "Missing API key"},
+        403: {"model": ErrorResponse, "description": "Invalid API key"},
         500: {"model": ErrorResponse, "description": "Update failed"}
     },
     summary="Update sanctions data",
     description="Download and reload OFAC and UN sanctions data"
 )
 async def update_data(
-    config: ConfigManager = Depends(get_config_instance)
+    config: ConfigManager = Depends(get_config_instance),
+    api_key: str = Depends(verify_api_key)
 ):
     """Download fresh sanctions data and reload the screener.
     
     Uses a lock for atomic screener swap to prevent race conditions
     during concurrent requests.
+    Requires API key authentication via X-API-Key header.
     """
     global _screener
     

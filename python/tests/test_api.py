@@ -14,10 +14,6 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch, AsyncMock
 from typing import List, Dict, Any
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-# Import after path setup
 from httpx import AsyncClient, ASGITransport
 from fastapi import FastAPI
 

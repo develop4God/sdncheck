@@ -15,11 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# Import shared utilities from parent modules
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from xml_utils import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
