@@ -53,19 +53,11 @@ def db_provider(db_settings):
     
     Uses pytest fixture pattern instead of singleton.
     """
-    from database.connection import create_test_provider
-    from sqlalchemy import create_engine
-    
-    # Create in-memory SQLite for fast unit tests
-    # (PostgreSQL-specific tests are skipped unless PG is available)
-    try:
-        engine = create_engine("sqlite:///:memory:", echo=False)
-        provider = create_test_provider(engine=engine)
-        provider.init()
-        yield provider
-    finally:
-        if provider:
-            provider.close()
+    from database.connection import DatabaseSessionProvider
+    provider = DatabaseSessionProvider(settings=db_settings)
+    provider.init()
+    yield provider
+    provider.close()
 
 
 @pytest.fixture
@@ -532,7 +524,7 @@ def pg_session():
 
 
 @pytest.mark.skipif(
-    True,  # Skip by default since PostgreSQL may not be running
+    False,  # Habilitado: ejecuta siempre el test de integración PostgreSQL
     reason="PostgreSQL integration tests require running database"
 )
 class TestPostgreSQLIntegration:
@@ -553,6 +545,72 @@ class TestPostgreSQLIntegration:
         pg_session.commit()
         
         assert entity.id is not None
+
+
+# ============================================
+# FASTAPI INTEGRATION TESTS
+# ============================================
+
+import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
+from database.connection import get_db, DatabaseSessionProvider, DatabaseSettings
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+@pytest.fixture
+def fastapi_app():
+    app = FastAPI()
+    provider = DatabaseSessionProvider(settings=DatabaseSettings(database="sdn_test_database"))
+    provider.init()
+
+    @app.get("/test-entity")
+    def test_entity(db=Depends(provider.get_session)):
+        from database.models import SanctionedEntity
+        entities = db.query(SanctionedEntity).all()
+        return {"count": len(entities)}
+
+    yield app
+    provider.close()
+
+
+def test_fastapi_di_lifecycle(fastapi_app):
+    client = TestClient(fastapi_app)
+    response = client.get("/test-entity")
+    assert response.status_code == 200
+    assert "count" in response.json()
+
+
+def test_unit_of_work_rollback(db_provider):
+    from database.models import SanctionedEntity
+    uow = db_provider.get_unit_of_work()
+    try:
+        with uow:
+            entity = SanctionedEntity(
+                external_id="ROLLBACK-TEST",
+                source="OFAC",
+                entity_type="individual",
+                primary_name="Rollback Test",
+                normalized_name="ROLLBACK TEST"
+            )
+            uow.session.add(entity)
+            raise Exception("Force rollback")
+    except Exception:
+        pass
+    # Entity should not be committed
+    with db_provider.session_scope() as session:
+        result = session.query(SanctionedEntity).filter_by(external_id="ROLLBACK-TEST").first()
+        assert result is None
+
+
+def test_concurrent_sessions(db_provider):
+    from database.models import SanctionedEntity
+    sessions = [db_provider.session_factory() for _ in range(3)]
+    for session in sessions:
+        entities = session.query(SanctionedEntity).all()
+        assert isinstance(entities, list)
+    for session in sessions:
+        session.close()
 
 
 if __name__ == "__main__":
