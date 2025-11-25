@@ -548,40 +548,76 @@ class TestPostgreSQLIntegration:
 
 
 # ============================================
-# FASTAPI INTEGRATION TESTS
+# FASTAPI INTEGRATION TESTS (require PostgreSQL)
 # ============================================
 
 import pytest
+import os
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from database.connection import get_db, DatabaseSessionProvider, DatabaseSettings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+
+def is_postgres_available():
+    """Check if PostgreSQL is available for integration tests."""
+    try:
+        settings = DatabaseSettings(
+            host=os.getenv("DB_HOST", "localhost"),
+            port=int(os.getenv("DB_PORT", "5432")),
+            database="sdn_test_database",
+            user="sdn_user",
+            password="sdn_password"
+        )
+        provider = DatabaseSessionProvider(settings=settings)
+        provider.init()
+        result = provider.health_check()
+        provider.close()
+        return result
+    except Exception:
+        return False
+
+
+# Mark tests that require PostgreSQL
+requires_postgres = pytest.mark.skipif(
+    not is_postgres_available(),
+    reason="PostgreSQL not available"
+)
+
+
 @pytest.fixture
 def fastapi_app():
-    app = FastAPI()
-    provider = DatabaseSessionProvider(settings=DatabaseSettings(database="sdn_test_database"))
-    provider.init()
+    """Create FastAPI app with database provider for testing."""
+    try:
+        app = FastAPI()
+        provider = DatabaseSessionProvider(settings=DatabaseSettings(database="sdn_test_database"))
+        provider.init()
 
-    @app.get("/test-entity")
-    def test_entity(db=Depends(provider.get_session)):
-        from database.models import SanctionedEntity
-        entities = db.query(SanctionedEntity).all()
-        return {"count": len(entities)}
+        @app.get("/test-entity")
+        def test_entity(db=Depends(provider.get_session)):
+            from database.models import SanctionedEntity
+            entities = db.query(SanctionedEntity).all()
+            return {"count": len(entities)}
 
-    yield app
-    provider.close()
+        yield app
+        provider.close()
+    except Exception:
+        pytest.skip("PostgreSQL not available")
 
 
+@requires_postgres
 def test_fastapi_di_lifecycle(fastapi_app):
+    """Test FastAPI dependency injection lifecycle with database."""
     client = TestClient(fastapi_app)
     response = client.get("/test-entity")
     assert response.status_code == 200
     assert "count" in response.json()
 
 
+@requires_postgres
 def test_unit_of_work_rollback(db_provider):
+    """Test that Unit of Work properly rolls back on exception."""
     from database.models import SanctionedEntity
     uow = db_provider.get_unit_of_work()
     try:
@@ -603,7 +639,9 @@ def test_unit_of_work_rollback(db_provider):
         assert result is None
 
 
+@requires_postgres
 def test_concurrent_sessions(db_provider):
+    """Test concurrent database sessions."""
     from database.models import SanctionedEntity
     sessions = [db_provider.session_factory() for _ in range(3)]
     for session in sessions:
