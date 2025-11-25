@@ -557,6 +557,7 @@ class ConstanciaReportGenerator:
     </style>
 </head>
 <body>
+    <button onclick="window.print()" style="position:fixed;top:30px;right:40px;padding:10px 18px;font-size:16px;background:#34495e;color:#fff;border:none;border-radius:6px;cursor:pointer;z-index:1000;">🖨️ Imprimir Reporte</button>
     <div class="report-container">
         <div class="header" style="text-align:center;">
             <div style="display: flex; justify-content: center; align-items: center; gap: 40px; margin-bottom: 10px;">
@@ -609,21 +610,20 @@ class ConstanciaReportGenerator:
                     <div class="info-grid" style="margin-top: 15px;">
                         <div class="info-label">Tipo:</div>
                         <div>{{ match.entity_type|upper }}</div>
-                    
+
                         <div class="info-label">Lista:</div>
                         <div><strong>{{ match.source }}</strong></div>
-                    
+
                         <div class="info-label">Identificación:</div>
-                        <div class="hash" style="font-size:1.2em;font-weight:bold;">
-                        {% if match.identifications %}
-                            {{ match.identifications | map(attribute='number') | select('string') | join(', ') }}
-                        {% else %}
-                            <span style="color:#e74c3c;">No disponible en la lista</span>
-                        {% endif %}
+                        <div>
+                            <span class="hash" style="font-size:1.2em;font-weight:bold;">
+                                {% if match.identifications %}
+                                    {{ match.identifications | map(attribute='number') | select('string') | join(', ') }}
+                                {% else %}
+                                    <span style="color:#e74c3c;">No disponible en la lista</span>
+                                {% endif %}
+                            </span>
                         </div>
-                    
-                        <div class="info-label">Programa:</div>
-                        <div>{{ match.program or 'N/A' }}</div>
                     
                         {% if match.last_name %}
                         <div class="info-label">Apellido:</div>
