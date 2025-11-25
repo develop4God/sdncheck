@@ -3,7 +3,8 @@ Database Package for SDNCheck Sanctions Screening System
 
 This package provides:
 - SQLAlchemy ORM models for all entities
-- Database connection management
+- FastAPI Dependency Injection for database sessions
+- Unit of Work pattern for transaction management
 - Repository pattern for data access
 - Alembic integration for migrations
 """
@@ -25,11 +26,23 @@ from database.models import (
     DataUpdate
 )
 from database.connection import (
-    DatabaseManager,
+    # New recommended classes
+    DatabaseSessionProvider,
+    DatabaseSettings,
+    UnitOfWork,
+    AsyncUnitOfWork,
+    # FastAPI dependencies
     get_db,
     get_async_db,
+    get_db_provider,
+    # Initialization
     init_db,
-    close_db
+    close_db,
+    # Testing support
+    create_test_provider,
+    # Backward compatible (deprecated)
+    DatabaseManager,
+    get_db_manager,
 )
 
 __all__ = [
@@ -51,10 +64,21 @@ __all__ = [
     'AuditLog',
     'DataSource',
     'DataUpdate',
-    # Connection management
-    'DatabaseManager',
+    # New database provider (recommended)
+    'DatabaseSessionProvider',
+    'DatabaseSettings',
+    'UnitOfWork',
+    'AsyncUnitOfWork',
+    # FastAPI dependencies
     'get_db',
     'get_async_db',
+    'get_db_provider',
+    # Initialization
     'init_db',
-    'close_db'
+    'close_db',
+    # Testing support
+    'create_test_provider',
+    # Backward compatible (deprecated)
+    'DatabaseManager',
+    'get_db_manager',
 ]

@@ -153,6 +153,8 @@ class SanctionedEntityRepository:
         """
         Search entities by name using trigram similarity.
         
+        Uses a single query with eager loading to avoid N+1 queries.
+        
         Args:
             name: Name to search for
             threshold: Minimum similarity threshold (0.0-1.0)
@@ -163,10 +165,10 @@ class SanctionedEntityRepository:
         """
         normalized = normalize_name(name)
         
-        # Use PostgreSQL trigram similarity
-        query = text("""
+        # First, get the IDs and similarity scores using raw SQL for trigram
+        id_query = text("""
             SELECT 
-                e.*,
+                e.id,
                 similarity(e.normalized_name, :name) as sim_score
             FROM sanctioned_entities e
             WHERE 
@@ -176,17 +178,42 @@ class SanctionedEntityRepository:
             LIMIT :limit
         """)
         
-        result = self.session.execute(
-            query,
+        id_result = self.session.execute(
+            id_query,
             {"name": normalized, "threshold": threshold, "limit": limit}
         )
         
-        # Convert to entities
+        # Collect IDs and scores
+        id_score_map = {}
+        entity_ids = []
+        for row in id_result.mappings():
+            entity_id = row['id']
+            entity_ids.append(entity_id)
+            id_score_map[entity_id] = row['sim_score']
+        
+        if not entity_ids:
+            return []
+        
+        # Single query with eager loading for all related data
+        # This fixes the N+1 query problem
+        entity_query = select(SanctionedEntity).where(
+            SanctionedEntity.id.in_(entity_ids)
+        ).options(
+            joinedload(SanctionedEntity.aliases),
+            joinedload(SanctionedEntity.documents),
+            joinedload(SanctionedEntity.addresses),
+            joinedload(SanctionedEntity.features)
+        )
+        
+        result = self.session.execute(entity_query)
+        entities_by_id = {e.id: e for e in result.scalars().unique()}
+        
+        # Build result list maintaining the original order and scores
         entities = []
-        for row in result.mappings():
-            entity = self.get_by_id(row['id'])
+        for entity_id in entity_ids:
+            entity = entities_by_id.get(entity_id)
             if entity:
-                entities.append((entity, row['sim_score']))
+                entities.append((entity, id_score_map[entity_id]))
         
         return entities
     
