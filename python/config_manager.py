@@ -13,6 +13,25 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class AdaptiveThresholdConfig:
+    """Adaptive thresholds by Unicode script"""
+    enabled: bool = True
+    chinese: int = 85
+    arabic: int = 90
+    cyrillic: int = 90
+    latin_initials: int = 98
+
+
+@dataclass
+class HashVerificationConfig:
+    """Hash verification settings"""
+    enabled: bool = True
+    max_retry_attempts: int = 3
+    known_hashes_file: str = "known_hashes.json"
+    alert_on_mismatch: bool = True
+
+
+@dataclass
 class MatchingConfig:
     """Matching configuration parameters"""
     name_threshold: int = 85
@@ -31,6 +50,7 @@ class MatchingConfig:
         'moderate_match': 70,
         'low_match': 60
     })
+    adaptive_thresholds: AdaptiveThresholdConfig = field(default_factory=AdaptiveThresholdConfig)
 
 
 @dataclass
@@ -40,9 +60,11 @@ class DataConfig:
     un_url: str = "https://scsanctions.un.org/resources/xml/en/consolidated.xml"
     update_frequency_days: int = 7
     xsd_validation: bool = True
+    xsd_strictness: str = "normal"  # strict, normal, lenient
     data_directory: str = "sanctions_data"
     entity_count_variance_threshold: float = 0.5
     malformed_entity_threshold: float = 1.0
+    hash_verification: HashVerificationConfig = field(default_factory=HashVerificationConfig)
 
 
 @dataclass
@@ -178,25 +200,49 @@ class ConfigManager:
     def _parse_matching(self) -> None:
         """Parse matching configuration"""
         cfg = self._raw_config.get('matching', {})
+        
+        # Parse adaptive thresholds
+        adaptive_cfg = cfg.get('adaptive_thresholds', {})
+        adaptive = AdaptiveThresholdConfig(
+            enabled=adaptive_cfg.get('enabled', True),
+            chinese=adaptive_cfg.get('chinese', 85),
+            arabic=adaptive_cfg.get('arabic', 90),
+            cyrillic=adaptive_cfg.get('cyrillic', 90),
+            latin_initials=adaptive_cfg.get('latin_initials', 98)
+        )
+        
         self.matching = MatchingConfig(
             name_threshold=cfg.get('name_threshold', 85),
             short_name_threshold=cfg.get('short_name_threshold', 95),
             common_names=cfg.get('common_names', []),
             weights=cfg.get('weights', self.matching.weights),
-            layers=cfg.get('layers', self.matching.layers)
+            layers=cfg.get('layers', self.matching.layers),
+            adaptive_thresholds=adaptive
         )
     
     def _parse_data(self) -> None:
         """Parse data configuration"""
         cfg = self._raw_config.get('data', {})
+        
+        # Parse hash verification config
+        hash_cfg = cfg.get('hash_verification', {})
+        hash_verification = HashVerificationConfig(
+            enabled=hash_cfg.get('enabled', True),
+            max_retry_attempts=hash_cfg.get('max_retry_attempts', 3),
+            known_hashes_file=hash_cfg.get('known_hashes_file', 'known_hashes.json'),
+            alert_on_mismatch=hash_cfg.get('alert_on_mismatch', True)
+        )
+        
         self.data = DataConfig(
             ofac_url=cfg.get('ofac_url', self.data.ofac_url),
             un_url=cfg.get('un_url', self.data.un_url),
             update_frequency_days=cfg.get('update_frequency_days', 7),
             xsd_validation=cfg.get('xsd_validation', True),
+            xsd_strictness=cfg.get('xsd_strictness', 'normal'),
             data_directory=cfg.get('data_directory', 'sanctions_data'),
             entity_count_variance_threshold=cfg.get('entity_count_variance_threshold', 0.5),
-            malformed_entity_threshold=cfg.get('malformed_entity_threshold', 1.0)
+            malformed_entity_threshold=cfg.get('malformed_entity_threshold', 1.0),
+            hash_verification=hash_verification
         )
     
     def _parse_reporting(self) -> None:

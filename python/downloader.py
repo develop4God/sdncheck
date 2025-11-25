@@ -17,6 +17,7 @@ import hashlib
 import logging
 import zipfile
 import re
+import json
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
@@ -210,19 +211,67 @@ class ValidationResult:
     is_valid: bool
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    infos: List[str] = field(default_factory=list)  # For informational messages
     entity_count: int = 0
     expected_count: Optional[int] = None
     malformed_count: int = 0
     file_hash: str = ""
     
     def add_error(self, message: str) -> None:
-        """Add an error message"""
+        """Add an error message (critical issues)"""
         self.errors.append(message)
         self.is_valid = False
         
     def add_warning(self, message: str) -> None:
-        """Add a warning message"""
+        """Add a warning message (non-critical issues)"""
         self.warnings.append(message)
+    
+    def add_info(self, message: str) -> None:
+        """Add an informational message (e.g., extra fields)"""
+        self.infos.append(message)
+
+
+@dataclass
+class XSDValidationError:
+    """XSD validation error with severity classification"""
+    message: str
+    line: Optional[int]
+    severity: str  # 'CRITICAL', 'WARNING', 'INFO'
+    
+    @classmethod
+    def from_lxml_error(cls, error: Any) -> 'XSDValidationError':
+        """Classify XSD error by severity"""
+        msg = str(error.message) if hasattr(error, 'message') else str(error)
+        line = error.line if hasattr(error, 'line') else None
+        
+        # CRITICAL: Missing mandatory fields or structural errors
+        critical_patterns = [
+            'missing required',
+            'mandatory',
+            'not allowed',
+            'invalid content',
+            'root element',
+        ]
+        
+        # WARNING: Missing optional fields
+        warning_patterns = [
+            'unexpected element',
+            'missing optional',
+            'deprecated',
+        ]
+        
+        msg_lower = msg.lower()
+        
+        for pattern in critical_patterns:
+            if pattern in msg_lower:
+                return cls(message=msg, line=line, severity='CRITICAL')
+        
+        for pattern in warning_patterns:
+            if pattern in msg_lower:
+                return cls(message=msg, line=line, severity='WARNING')
+        
+        # INFO: Extra/unknown fields (future OFAC additions)
+        return cls(message=msg, line=line, severity='INFO')
 
 
 class EnhancedSanctionsDownloader:
@@ -253,37 +302,155 @@ class EnhancedSanctionsDownloader:
         self._discovered_country_codes: set = set()
         self._discovered_list_types: set = set()
         
+        # Known hashes database path
+        self._known_hashes_path = self.data_dir / self.config.data.hash_verification.known_hashes_file
+    
+    def _get_known_good_hash(self, filename: str) -> Optional[str]:
+        """Get known-good hash for a file from the hash database
+        
+        Args:
+            filename: Name of the file
+            
+        Returns:
+            Known hash or None if not found
+        """
+        if not self._known_hashes_path.exists():
+            return None
+        
+        try:
+            with open(self._known_hashes_path, 'r') as f:
+                hashes = json.load(f)
+            return hashes.get(filename, {}).get('hash')
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Could not read known hashes: {e}")
+            return None
+    
+    def _save_known_good_hash(self, filename: str, file_hash: str) -> None:
+        """Save a known-good hash to the database
+        
+        Args:
+            filename: Name of the file
+            file_hash: SHA256 hash of the file
+        """
+        hashes = {}
+        if self._known_hashes_path.exists():
+            try:
+                with open(self._known_hashes_path, 'r') as f:
+                    hashes = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                pass
+        
+        # Add new hash with timestamp (use UTC with timezone info)
+        from datetime import timezone
+        hashes[filename] = {
+            'hash': file_hash,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'verified': True
+        }
+        
+        # Keep history of last 10 hashes per file
+        history_key = f"{filename}_history"
+        if history_key not in hashes:
+            hashes[history_key] = []
+        hashes[history_key].append({
+            'hash': file_hash,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+        hashes[history_key] = hashes[history_key][-10:]  # Keep last 10
+        
+        try:
+            with open(self._known_hashes_path, 'w') as f:
+                json.dump(hashes, f, indent=2)
+            logger.info(f"  Saved known-good hash for {filename}")
+        except IOError as e:
+            logger.warning(f"Could not save hash: {e}")
+    
+    def _verify_hash(self, filepath: Path, filename: str) -> Tuple[bool, str]:
+        """Verify file hash against known-good database
+        
+        Args:
+            filepath: Path to the file
+            filename: Logical name of the file (for hash database)
+            
+        Returns:
+            Tuple of (is_valid, file_hash)
+        """
+        file_hash = self._calculate_hash(filepath)
+        expected_hash = self._get_known_good_hash(filename)
+        
+        if expected_hash is None:
+            # No known hash - this is a first download, consider valid
+            logger.info(f"  No known hash for {filename}, accepting new download")
+            return True, file_hash
+        
+        if file_hash == expected_hash:
+            logger.info(f"  ✓ Hash verified for {filename}")
+            return True, file_hash
+        else:
+            logger.warning(f"  ✗ Hash mismatch for {filename}!")
+            logger.warning(f"    Expected: {expected_hash[:16]}...")
+            logger.warning(f"    Got: {file_hash[:16]}...")
+            return False, file_hash
+    
     def download_ofac(self) -> Optional[Path]:
-        """Download OFAC SDN Enhanced list
+        """Download OFAC SDN Enhanced list with hash verification and retry
         
         Returns:
             Path to downloaded ZIP file or None on failure
         """
         url = self.config.data.ofac_url
+        hash_config = self.config.data.hash_verification
+        max_attempts = hash_config.max_retry_attempts if hash_config.enabled else 1
+        
         logger.info(f"Downloading OFAC SDN Enhanced from {url}")
         
-        try:
-            response = requests.get(url, stream=True, timeout=120)
-            response.raise_for_status()
-            
-            filepath = self.data_dir / "ofac_enhanced.zip"
-            
-            with open(filepath, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            size_mb = filepath.stat().st_size / 1024 / 1024
-            logger.info(f"✓ Downloaded OFAC list: {filepath} ({size_mb:.1f} MB)")
-            
-            # Calculate hash
-            file_hash = self._calculate_hash(filepath)
-            logger.info(f"  File hash (SHA256): {file_hash[:16]}...")
-            
-            return filepath
-            
-        except requests.RequestException as e:
-            logger.error(f"✗ Failed to download OFAC list: {e}")
-            return None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.get(url, stream=True, timeout=120)
+                response.raise_for_status()
+                
+                filepath = self.data_dir / "ofac_enhanced.zip"
+                
+                with open(filepath, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                size_mb = filepath.stat().st_size / 1024 / 1024
+                logger.info(f"✓ Downloaded OFAC list: {filepath} ({size_mb:.1f} MB)")
+                
+                # Verify hash if enabled
+                if hash_config.enabled:
+                    is_valid, file_hash = self._verify_hash(filepath, "ofac_enhanced.zip")
+                    
+                    if not is_valid:
+                        if attempt < max_attempts:
+                            logger.warning(f"  Retrying download (attempt {attempt + 1}/{max_attempts})...")
+                            continue
+                        else:
+                            # Max retries exhausted
+                            if hash_config.alert_on_mismatch:
+                                logger.error(f"ALERT: OFAC download hash mismatch after {max_attempts} attempts!")
+                                logger.error("Download may be corrupted or source file has changed.")
+                            # Still return the file - let caller decide what to do
+                            return filepath
+                    
+                    # Save as new known-good hash
+                    self._save_known_good_hash("ofac_enhanced.zip", file_hash)
+                else:
+                    # Just calculate and log the hash
+                    file_hash = self._calculate_hash(filepath)
+                    logger.info(f"  File hash (SHA256): {file_hash[:16]}...")
+                
+                return filepath
+                
+            except requests.RequestException as e:
+                logger.error(f"✗ Failed to download OFAC list (attempt {attempt}/{max_attempts}): {e}")
+                if attempt < max_attempts:
+                    logger.info(f"  Retrying...")
+                    continue
+                return None
+        
+        return None
     
     def unzip_ofac(self) -> Optional[Path]:
         """Extract OFAC XML from ZIP file
@@ -402,7 +569,7 @@ class EnhancedSanctionsDownloader:
             return ''
     
     def validate_ofac_xml(self, xml_path: Path, xsd_path: Optional[Path] = None) -> ValidationResult:
-        """Validate OFAC XML structure and integrity
+        """Validate OFAC XML structure and integrity with severity classification
         
         Args:
             xml_path: Path to XML file
@@ -410,6 +577,11 @@ class EnhancedSanctionsDownloader:
             
         Returns:
             ValidationResult with details
+        
+        XSD validation strictness levels:
+        - strict: Fail on any error (critical/warning/info)
+        - normal: Fail on critical errors, warn on others (default)
+        - lenient: Only fail on critical (missing mandatory fields), ignore others
         """
         result = ValidationResult(is_valid=True)
         
@@ -421,6 +593,7 @@ class EnhancedSanctionsDownloader:
         result.file_hash = self._calculate_hash(xml_path)
         
         # XSD validation if available and enabled
+        strictness = self.config.data.xsd_strictness
         if self.config.data.xsd_validation and xsd_path and xsd_path.exists() and HAS_LXML:
             try:
                 # Use secure parser for XSD validation
@@ -433,9 +606,39 @@ class EnhancedSanctionsDownloader:
                     xml_doc = etree.parse(f, parser)
                 
                 if not schema.validate(xml_doc):
+                    # Classify errors by severity
+                    critical_count = 0
+                    warning_count = 0
+                    info_count = 0
+                    
                     for error in schema.error_log:
-                        result.add_warning(f"XSD validation warning (line {error.line}): {error.message}")
-                    logger.warning("XSD validation found issues (proceeding with warnings)")
+                        xsd_error = XSDValidationError.from_lxml_error(error)
+                        
+                        if xsd_error.severity == 'CRITICAL':
+                            critical_count += 1
+                            if strictness in ('strict', 'normal'):
+                                result.add_error(f"XSD CRITICAL (line {xsd_error.line}): {xsd_error.message}")
+                            else:  # lenient
+                                result.add_warning(f"XSD CRITICAL (line {xsd_error.line}): {xsd_error.message}")
+                        
+                        elif xsd_error.severity == 'WARNING':
+                            warning_count += 1
+                            if strictness == 'strict':
+                                result.add_error(f"XSD WARNING (line {xsd_error.line}): {xsd_error.message}")
+                            else:
+                                result.add_warning(f"XSD WARNING (line {xsd_error.line}): {xsd_error.message}")
+                        
+                        else:  # INFO
+                            info_count += 1
+                            if strictness == 'strict':
+                                result.add_error(f"XSD INFO (line {xsd_error.line}): {xsd_error.message}")
+                            else:
+                                result.add_info(f"XSD INFO (line {xsd_error.line}): {xsd_error.message}")
+                    
+                    logger.warning(f"XSD validation: {critical_count} critical, {warning_count} warnings, {info_count} info")
+                    
+                    if result.is_valid:
+                        logger.info("XSD validation found issues but proceeding (non-critical)")
                 else:
                     logger.info("✓ XSD validation passed")
                     

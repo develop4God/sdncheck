@@ -11,6 +11,15 @@ matching:
   # Stricter threshold for short names (<=2 words or <10 chars)
   short_name_threshold: 95
   
+  # Adaptive thresholds by Unicode script
+  # Applied when allow_unicode_names is true
+  adaptive_thresholds:
+    enabled: true
+    chinese: 85        # Chinese 2-char names (李明) are valid
+    arabic: 90         # Arabic mononyms (محمد) are valid
+    cyrillic: 90       # Cyrillic names (Владимир) are valid
+    latin_initials: 98 # English 2-char initials (J.D.) are suspicious
+  
   # Common names requiring extra validation (document or DOB match)
   common_names:
     - "Mohamed Ali"
@@ -74,6 +83,12 @@ data:
   # Enable XSD schema validation
   xsd_validation: true
   
+  # XSD validation strictness level
+  # strict: Fail on any error (critical/warning/info)
+  # normal: Fail on critical errors, warn on others (default)
+  # lenient: Only fail on critical (missing mandatory fields), ignore others
+  xsd_strictness: "normal"
+  
   # Data directory
   data_directory: "sanctions_data"
   
@@ -82,6 +97,13 @@ data:
   
   # Maximum percentage of malformed entities allowed
   malformed_entity_threshold: 1.0
+  
+  # Hash verification settings
+  hash_verification:
+    enabled: true
+    max_retry_attempts: 3
+    known_hashes_file: "known_hashes.json"
+    alert_on_mismatch: true
 
 # Reporting Configuration
 reporting:

@@ -1149,5 +1149,241 @@ class TestSecurityLoggerContextSanitization:
         assert logger._sanitize_context({}) == {}
 
 
+class TestHashVerification:
+    """Tests for BUG-3: Hash verification with retry logic"""
+    
+    def test_hash_database_save_and_load(self, tmp_path):
+        """Test that hash database can save and load hashes"""
+        from downloader import EnhancedSanctionsDownloader
+        
+        # Create test downloader with temp directory
+        with patch('config_manager.ConfigManager.get_instance') as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.data.data_directory = str(tmp_path)
+            mock_cfg.data.hash_verification.enabled = True
+            mock_cfg.data.hash_verification.max_retry_attempts = 3
+            mock_cfg.data.hash_verification.known_hashes_file = 'known_hashes.json'
+            mock_cfg.data.hash_verification.alert_on_mismatch = True
+            mock_config.return_value = mock_cfg
+            
+            downloader = EnhancedSanctionsDownloader(mock_cfg)
+            
+            # Save a test hash
+            test_hash = 'abc123def456'
+            downloader._save_known_good_hash('test_file.zip', test_hash)
+            
+            # Verify it can be retrieved
+            retrieved = downloader._get_known_good_hash('test_file.zip')
+            assert retrieved == test_hash
+    
+    def test_hash_verification_new_file(self, tmp_path):
+        """Test that new files (no known hash) are accepted"""
+        from downloader import EnhancedSanctionsDownloader
+        
+        # Create a test file
+        test_file = tmp_path / 'new_file.zip'
+        test_file.write_bytes(b'test content')
+        
+        with patch('config_manager.ConfigManager.get_instance') as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.data.data_directory = str(tmp_path)
+            mock_cfg.data.hash_verification.enabled = True
+            mock_cfg.data.hash_verification.known_hashes_file = 'known_hashes.json'
+            mock_config.return_value = mock_cfg
+            
+            downloader = EnhancedSanctionsDownloader(mock_cfg)
+            
+            # Verify new file (no known hash) is accepted
+            is_valid, file_hash = downloader._verify_hash(test_file, 'new_file.zip')
+            assert is_valid is True
+            assert len(file_hash) == 64  # SHA256 hex length
+    
+    def test_hash_verification_mismatch(self, tmp_path):
+        """Test that hash mismatch is detected"""
+        from downloader import EnhancedSanctionsDownloader
+        
+        # Create a test file
+        test_file = tmp_path / 'test_file.zip'
+        test_file.write_bytes(b'test content')
+        
+        with patch('config_manager.ConfigManager.get_instance') as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.data.data_directory = str(tmp_path)
+            mock_cfg.data.hash_verification.enabled = True
+            mock_cfg.data.hash_verification.known_hashes_file = 'known_hashes.json'
+            mock_config.return_value = mock_cfg
+            
+            downloader = EnhancedSanctionsDownloader(mock_cfg)
+            
+            # Save a different known hash
+            downloader._save_known_good_hash('test_file.zip', 'wrong_hash_value_000000000000000000000000000000000000')
+            
+            # Verify mismatch is detected
+            is_valid, file_hash = downloader._verify_hash(test_file, 'test_file.zip')
+            assert is_valid is False
+
+
+class TestAdaptiveThresholds:
+    """Tests for GAP-2: Unicode script-based adaptive thresholds"""
+    
+    def test_detect_chinese_script(self):
+        """Test Chinese script detection"""
+        from screener import EnhancedSanctionsScreener
+        
+        with patch('config_manager.ConfigManager.get_instance') as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.data.data_directory = '/tmp'
+            mock_cfg.matching.common_names = []
+            mock_config.return_value = mock_cfg
+            
+            screener = EnhancedSanctionsScreener.__new__(EnhancedSanctionsScreener)
+            screener.config = mock_cfg
+            
+            assert screener._detect_unicode_script("李明") == 'chinese'
+            assert screener._detect_unicode_script("王伟") == 'chinese'
+    
+    def test_detect_arabic_script(self):
+        """Test Arabic script detection"""
+        from screener import EnhancedSanctionsScreener
+        
+        with patch('config_manager.ConfigManager.get_instance') as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.data.data_directory = '/tmp'
+            mock_cfg.matching.common_names = []
+            mock_config.return_value = mock_cfg
+            
+            screener = EnhancedSanctionsScreener.__new__(EnhancedSanctionsScreener)
+            screener.config = mock_cfg
+            
+            assert screener._detect_unicode_script("محمد") == 'arabic'
+            assert screener._detect_unicode_script("فاطمة") == 'arabic'
+    
+    def test_detect_cyrillic_script(self):
+        """Test Cyrillic script detection"""
+        from screener import EnhancedSanctionsScreener
+        
+        with patch('config_manager.ConfigManager.get_instance') as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.data.data_directory = '/tmp'
+            mock_cfg.matching.common_names = []
+            mock_config.return_value = mock_cfg
+            
+            screener = EnhancedSanctionsScreener.__new__(EnhancedSanctionsScreener)
+            screener.config = mock_cfg
+            
+            assert screener._detect_unicode_script("Владимир") == 'cyrillic'
+            assert screener._detect_unicode_script("Мария") == 'cyrillic'
+    
+    def test_detect_latin_script(self):
+        """Test Latin script detection"""
+        from screener import EnhancedSanctionsScreener
+        
+        with patch('config_manager.ConfigManager.get_instance') as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.data.data_directory = '/tmp'
+            mock_cfg.matching.common_names = []
+            mock_config.return_value = mock_cfg
+            
+            screener = EnhancedSanctionsScreener.__new__(EnhancedSanctionsScreener)
+            screener.config = mock_cfg
+            
+            assert screener._detect_unicode_script("John Smith") == 'latin'
+            assert screener._detect_unicode_script("José María") == 'latin'
+    
+    def test_is_latin_initials(self):
+        """Test Latin initials detection (J.D., A.B.C.)"""
+        from screener import EnhancedSanctionsScreener
+        
+        with patch('config_manager.ConfigManager.get_instance') as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.data.data_directory = '/tmp'
+            mock_cfg.matching.common_names = []
+            mock_config.return_value = mock_cfg
+            
+            screener = EnhancedSanctionsScreener.__new__(EnhancedSanctionsScreener)
+            screener.config = mock_cfg
+            
+            assert screener._is_latin_initials("J.D.") is True
+            assert screener._is_latin_initials("A.B.") is True
+            # Note: "ABC" is considered suspicious because it's 3 uppercase letters
+            # This may catch some false positives but errs on the side of caution
+            assert screener._is_latin_initials("ABC") is True
+            assert screener._is_latin_initials("John") is False  # Mixed case
+            assert screener._is_latin_initials("李明") is False  # Non-Latin
+    
+    def test_adaptive_threshold_chinese_name(self):
+        """Test that Chinese names get lower threshold"""
+        from screener import EnhancedSanctionsScreener
+        from config_manager import AdaptiveThresholdConfig
+        
+        with patch('config_manager.ConfigManager.get_instance') as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.data.data_directory = '/tmp'
+            mock_cfg.matching.common_names = []
+            mock_cfg.matching.short_name_threshold = 95
+            mock_cfg.matching.adaptive_thresholds = AdaptiveThresholdConfig(
+                enabled=True, chinese=85, arabic=90, cyrillic=90, latin_initials=98
+            )
+            mock_config.return_value = mock_cfg
+            
+            screener = EnhancedSanctionsScreener.__new__(EnhancedSanctionsScreener)
+            screener.config = mock_cfg
+            
+            threshold, reason = screener._get_adaptive_threshold("李明")
+            assert threshold == 85
+            assert reason == 'chinese_name'
+    
+    def test_adaptive_threshold_latin_initials(self):
+        """Test that Latin initials get stricter threshold"""
+        from screener import EnhancedSanctionsScreener
+        from config_manager import AdaptiveThresholdConfig
+        
+        with patch('config_manager.ConfigManager.get_instance') as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.data.data_directory = '/tmp'
+            mock_cfg.matching.common_names = []
+            mock_cfg.matching.short_name_threshold = 95
+            mock_cfg.matching.adaptive_thresholds = AdaptiveThresholdConfig(
+                enabled=True, chinese=85, arabic=90, cyrillic=90, latin_initials=98
+            )
+            mock_config.return_value = mock_cfg
+            
+            screener = EnhancedSanctionsScreener.__new__(EnhancedSanctionsScreener)
+            screener.config = mock_cfg
+            
+            threshold, reason = screener._get_adaptive_threshold("J.D.")
+            assert threshold == 98
+            assert reason == 'latin_initials'
+
+
+class TestXSDSeverityClassification:
+    """Tests for GAP-1: XSD validation with severity classification"""
+    
+    def test_xsd_validation_error_classification(self):
+        """Test that XSD errors are classified by severity"""
+        from downloader import XSDValidationError
+        
+        # Create mock error objects
+        class MockError:
+            def __init__(self, message, line):
+                self.message = message
+                self.line = line
+        
+        # Critical error (missing required)
+        critical_err = MockError("Element 'entity' is missing required attribute 'id'", 10)
+        result = XSDValidationError.from_lxml_error(critical_err)
+        assert result.severity == 'CRITICAL'
+        
+        # Warning (unexpected element)
+        warning_err = MockError("Unexpected element 'newField' found", 20)
+        result = XSDValidationError.from_lxml_error(warning_err)
+        assert result.severity == 'WARNING'
+        
+        # Info (unknown issue - treated as INFO)
+        info_err = MockError("Some other validation message", 30)
+        result = XSDValidationError.from_lxml_error(info_err)
+        assert result.severity == 'INFO'
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

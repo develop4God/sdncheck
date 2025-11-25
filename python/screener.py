@@ -44,6 +44,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Unicode script ranges for internationalization
+# CJK Unified Ideographs (Chinese)
+UNICODE_CJK_START = '\u4E00'
+UNICODE_CJK_END = '\u9FFF'
+# Arabic
+UNICODE_ARABIC_START = '\u0600'
+UNICODE_ARABIC_END = '\u06FF'
+# Cyrillic
+UNICODE_CYRILLIC_START = '\u0400'
+UNICODE_CYRILLIC_END = '\u04FF'
+
 # Input validation patterns
 NAME_PATTERN = re.compile(r'^[A-Za-zÀ-ÿ\s\-\.\'\,\u0600-\u06FF\u0400-\u04FF\u4E00-\u9FFF]{2,200}$')
 DOB_PATTERN = re.compile(r'^\d{4}(-\d{2}(-\d{2})?)?$')  # YYYY, YYYY-MM, or YYYY-MM-DD
@@ -617,6 +628,83 @@ class EnhancedSanctionsScreener:
         normalized = re.sub(r'[\s\-\.\,\/]', '', doc_number)
         return normalized.upper()
     
+    def _detect_unicode_script(self, name: str) -> str:
+        """Detect the primary Unicode script of a name
+        
+        Returns:
+            Script category: 'chinese', 'arabic', 'cyrillic', 'latin', 'mixed'
+        """
+        chinese_count = 0
+        arabic_count = 0
+        cyrillic_count = 0
+        latin_count = 0
+        
+        for char in name:
+            if UNICODE_CJK_START <= char <= UNICODE_CJK_END:
+                chinese_count += 1
+            elif UNICODE_ARABIC_START <= char <= UNICODE_ARABIC_END:
+                arabic_count += 1
+            elif UNICODE_CYRILLIC_START <= char <= UNICODE_CYRILLIC_END:
+                cyrillic_count += 1
+            elif char.isalpha():  # Other letters (Latin, etc.)
+                latin_count += 1
+        
+        total = chinese_count + arabic_count + cyrillic_count + latin_count
+        if total == 0:
+            return 'latin'  # Default
+        
+        # Determine dominant script (>50% of letters)
+        if chinese_count / total > 0.5:
+            return 'chinese'
+        elif arabic_count / total > 0.5:
+            return 'arabic'
+        elif cyrillic_count / total > 0.5:
+            return 'cyrillic'
+        elif latin_count / total > 0.5:
+            return 'latin'
+        else:
+            return 'mixed'
+    
+    def _is_latin_initials(self, name: str) -> bool:
+        """Check if name appears to be Latin initials like 'J.D.' or 'A.B.C.'"""
+        # Remove dots and spaces
+        cleaned = name.replace('.', '').replace(' ', '')
+        # Check if it's all uppercase and short
+        return len(cleaned) <= 4 and cleaned.isupper() and cleaned.isalpha()
+    
+    def _get_adaptive_threshold(self, name: str) -> Tuple[int, str]:
+        """Get adaptive threshold based on Unicode script detection
+        
+        Args:
+            name: The name to check
+            
+        Returns:
+            Tuple of (threshold, reason)
+        """
+        adaptive = self.config.matching.adaptive_thresholds
+        
+        if not adaptive.enabled:
+            return self.config.matching.short_name_threshold, 'default'
+        
+        # First check for Latin initials (most suspicious)
+        if self._is_latin_initials(name):
+            return adaptive.latin_initials, 'latin_initials'
+        
+        # Detect primary script
+        script = self._detect_unicode_script(name)
+        
+        if script == 'chinese':
+            # Chinese 2-char names are valid and common
+            return adaptive.chinese, 'chinese_name'
+        elif script == 'arabic':
+            # Arabic mononyms are valid
+            return adaptive.arabic, 'arabic_name'
+        elif script == 'cyrillic':
+            return adaptive.cyrillic, 'cyrillic_name'
+        else:
+            # Default Latin behavior
+            return self.config.matching.short_name_threshold, 'latin_default'
+    
     def _is_short_name(self, name: str) -> bool:
         """Check if name is considered short (requires stricter matching)"""
         words = name.split()
@@ -719,8 +807,11 @@ class EnhancedSanctionsScreener:
         is_common = self._is_common_name(input_data.name)
         
         base_threshold = self.config.matching.name_threshold
+        threshold_reason = 'default'
+        
         if is_short:
-            base_threshold = self.config.matching.short_name_threshold
+            # Use adaptive threshold based on Unicode script
+            base_threshold, threshold_reason = self._get_adaptive_threshold(input_data.name)
         
         weights = self.config.matching.weights
         layers = self.config.matching.layers
@@ -859,6 +950,9 @@ class EnhancedSanctionsScreener:
             # Add flags
             if is_short:
                 flags.append('SHORT_NAME_QUERY')
+                # Add adaptive threshold info flag
+                if threshold_reason != 'default' and threshold_reason != 'latin_default':
+                    flags.append(f'ADAPTIVE_THRESHOLD_{threshold_reason.upper()}')
             if is_common:
                 flags.append('COMMON_NAME')
             # Add nationality info flag if match found (informational only)
