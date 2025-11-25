@@ -7,6 +7,7 @@ This package provides:
 - Unit of Work pattern for transaction management
 - Repository pattern for data access
 - Alembic integration for migrations
+- Performance monitoring and query timing
 """
 
 from database.models import (
@@ -44,6 +45,17 @@ from database.connection import (
     DatabaseManager,
     get_db_manager,
 )
+from database.monitoring import (
+    query_timer,
+    timed_query,
+    async_timed_query,
+    get_db_metrics,
+    get_slow_query_report,
+    reset_metrics,
+    configure_monitoring,
+    check_health,
+    HealthStatus,
+)
 
 __all__ = [
     # Base
@@ -78,6 +90,16 @@ __all__ = [
     'close_db',
     # Testing support
     'create_test_provider',
+    # Monitoring
+    'query_timer',
+    'timed_query',
+    'async_timed_query',
+    'get_db_metrics',
+    'get_slow_query_report',
+    'reset_metrics',
+    'configure_monitoring',
+    'check_health',
+    'HealthStatus',
     # Backward compatible (deprecated)
     'DatabaseManager',
     'get_db_manager',

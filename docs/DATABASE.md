@@ -246,6 +246,132 @@ pytest tests/ -v --ignore=tests/test_performance.py
 
 ---
 
+## Data Migration Strategy
+
+This section outlines how to migrate data for different deployment scenarios.
+
+### Scenario A: Greenfield (No Production Data)
+
+For new installations with no existing data:
+
+```bash
+# 1. Start PostgreSQL
+docker-compose up -d db
+
+# 2. Apply migrations
+./scripts/migrate.sh upgrade
+
+# 3. Load initial reference data
+cd python
+python load_initial_data.py
+
+# 4. (Optional) Load sample data for development
+python load_initial_data.py --with-samples
+```
+
+### Scenario B: Brownfield (Existing Production Data)
+
+For systems with existing production data:
+
+#### 1. Pre-Migration (1 week before)
+
+```bash
+# Backup current production
+./scripts/backup_database.sh
+
+# Verify backup integrity
+./scripts/test_backup_restore.sh
+```
+
+#### 2. Staging Validation
+
+```bash
+# Clone production to staging
+pg_dump -h prod-host -U sdn_user sdn_database | \
+    psql -h staging-host -U sdn_user sdn_database
+
+# Test migration in staging
+./scripts/migrate.sh upgrade
+
+# Validate data integrity
+python functional_test_db.py
+
+# Test rollback
+./scripts/migrate.sh downgrade
+# Verify data restored correctly
+```
+
+#### 3. Production Deployment
+
+```bash
+# Schedule maintenance window
+# Notify stakeholders
+
+# Create backup before migration
+./scripts/backup_database.sh --tag pre-migration
+
+# Apply migration with monitoring
+./scripts/migrate.sh upgrade
+
+# Validate critical queries
+python functional_test_db.py
+
+# Verify performance
+python -c "from database.monitoring import get_db_metrics; print(get_db_metrics())"
+```
+
+### Data Validation Checklist
+
+After any migration, verify:
+
+- [ ] **Row counts match** before/after for all tables
+- [ ] **Foreign key constraints** are satisfied
+- [ ] **No orphaned records** in child tables
+- [ ] **Index integrity** (run `REINDEX DATABASE sdn_database;` if needed)
+- [ ] **Query performance** within SLA (P95 < 500ms)
+- [ ] **Application smoke tests** pass
+
+### Validation Script
+
+```bash
+# Run full validation
+cd python
+
+# Count rows in critical tables
+python -c "
+from database.connection import get_db_provider
+from sqlalchemy import text
+
+provider = get_db_provider()
+provider.init()
+
+with provider.session_scope() as session:
+    tables = ['sanctioned_entities', 'entity_aliases', 'screening_requests', 'audit_logs']
+    for table in tables:
+        count = session.execute(text(f'SELECT COUNT(*) FROM {table}')).scalar()
+        print(f'{table}: {count} rows')
+"
+
+# Test search performance
+python -c "
+import time
+from database.connection import get_db_provider
+from database.repositories import SanctionedEntityRepository
+
+provider = get_db_provider()
+provider.init()
+
+with provider.session_scope() as session:
+    repo = SanctionedEntityRepository(session)
+    start = time.time()
+    results = repo.search_by_name('John Smith', threshold=0.3, limit=100)
+    duration = (time.time() - start) * 1000
+    print(f'Search returned {len(results)} results in {duration:.2f}ms')
+"
+```
+
+---
+
 ## Production Deployment
 
 ### Security Checklist

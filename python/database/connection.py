@@ -13,6 +13,7 @@ Uses SQLAlchemy 2.0 style with proper typing support.
 
 import os
 import logging
+import threading
 from typing import Generator, Optional, AsyncGenerator, Callable
 from contextlib import contextmanager, asynccontextmanager
 from functools import lru_cache
@@ -591,32 +592,86 @@ class DatabaseSessionProvider:
 # BACKWARD COMPATIBLE SINGLETON (DEPRECATED)
 # ============================================
 
+import warnings
+
+
 class DatabaseManager(DatabaseSessionProvider):
     """
     DEPRECATED: Use DatabaseSessionProvider instead.
     
     Maintained for backward compatibility with existing code.
-    This class will be removed in a future version.
+    This class will be removed in version 2.0.
+    
+    Migration Guide:
+        See docs/MIGRATION_GUIDE.md for migration instructions.
+    
+    Example Migration:
+        # Before (deprecated):
+        db = DatabaseManager()
+        with db.session() as session:
+            entities = session.query(SanctionedEntity).all()
+        
+        # After (recommended):
+        from database.connection import get_db
+        
+        @app.get("/entities")
+        def get_entities(db: Session = Depends(get_db)):
+            return db.query(SanctionedEntity).all()
     """
     
     _instance: Optional['DatabaseManager'] = None
+    _deprecation_warning_shown: bool = False
+    _warning_lock = threading.Lock()
     
     def __new__(cls, *args, **kwargs) -> 'DatabaseManager':
         """Singleton pattern for backward compatibility."""
         if cls._instance is None:
             cls._instance = object.__new__(cls)
             cls._instance._initialized = False
+        
+        # Show deprecation warning once per session (thread-safe)
+        with cls._warning_lock:
+            if not cls._deprecation_warning_shown:
+                warnings.warn(
+                    "DatabaseManager is deprecated and will be removed in version 2.0. "
+                    "Use DatabaseSessionProvider with FastAPI Depends() or get_db() instead. "
+                    "See docs/MIGRATION_GUIDE.md for migration instructions.",
+                    DeprecationWarning,
+                    stacklevel=2
+                )
+                cls._deprecation_warning_shown = True
+        
         return cls._instance
     
     @contextmanager
     def session(self) -> Generator[Session, None, None]:
-        """DEPRECATED: Use session_scope() or get_session() instead."""
+        """
+        DEPRECATED: Use session_scope() or get_session() instead.
+        
+        This method will be removed in version 2.0.
+        """
+        warnings.warn(
+            "DatabaseManager.session() is deprecated. "
+            "Use session_scope() or FastAPI Depends(get_db) instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         with self.session_scope() as session:
             yield session
     
     @asynccontextmanager
     async def async_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """DEPRECATED: Use async_session_scope() instead."""
+        """
+        DEPRECATED: Use async_session_scope() instead.
+        
+        This method will be removed in version 2.0.
+        """
+        warnings.warn(
+            "DatabaseManager.async_session() is deprecated. "
+            "Use async_session_scope() or FastAPI Depends(get_async_db) instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         async with self.async_session_scope() as session:
             yield session
     
@@ -626,6 +681,7 @@ class DatabaseManager(DatabaseSessionProvider):
         if cls._instance and cls._instance._engine:
             cls._instance._engine.dispose()
         cls._instance = None
+        cls._deprecation_warning_shown = False
 
 
 # ============================================
@@ -717,9 +773,18 @@ def get_db_manager() -> DatabaseManager:
     DEPRECATED: Get the global database manager instance.
     Use get_db_provider() instead.
     
+    This function will be removed in version 2.0.
+    See docs/MIGRATION_GUIDE.md for migration instructions.
+    
     Returns:
         DatabaseManager instance
     """
+    warnings.warn(
+        "get_db_manager() is deprecated and will be removed in version 2.0. "
+        "Use get_db_provider() instead. See docs/MIGRATION_GUIDE.md for details.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     return DatabaseManager()
 
 
