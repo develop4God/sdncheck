@@ -14,9 +14,38 @@ services:
     volumes:
       # Mantiene los datos persistentes incluso si el contenedor se elimina
       - postgres_data:/var/lib/postgresql/data
+      # Scripts de inicialización (se ejecutan solo en la primera creación)
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
     ports:
       # Mapea el puerto del contenedor (5432) al puerto de tu máquina local (5432)
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sdn_user -d sdn_database"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # 2. Servicio de la API (opcional - descomentar cuando esté listo)
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: sdncheck_api
+  #   restart: always
+  #   environment:
+  #     DB_HOST: db
+  #     DB_PORT: 5432
+  #     DB_NAME: sdn_database
+  #     DB_USER: sdn_user
+  #     DB_PASSWORD: sdn_password
+  #     API_HOST: 0.0.0.0
+  #     API_PORT: 8000
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
 
 volumes:
   # Define el volumen persistente
