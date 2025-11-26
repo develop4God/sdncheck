@@ -1,0 +1,124 @@
+# Docker Compose configuration for staging environment
+# Used for pre-production testing and validation before deployment
+
+services:
+  # PostgreSQL Database for Staging
+  db:
+    image: postgres:15-alpine
+    container_name: sdncheck_postgres_staging
+    restart: always
+    environment:
+      # Staging credentials (use secrets in production)
+      POSTGRES_USER: ${DB_USER:-sdn_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-sdn_staging_password}
+      POSTGRES_DB: ${DB_NAME:-sdn_database_staging}
+    volumes:
+      # Persistent data volume
+      - postgres_data_staging:/var/lib/postgresql/data
+      # Initialization scripts (run only on first creation)
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-sdn_user} -d ${DB_NAME:-sdn_database_staging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - sdncheck_staging
+
+  # SDNCheck API for Staging
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sdncheck_api_staging
+    restart: always
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-sdn_database_staging}
+      DB_USER: ${DB_USER:-sdn_user}
+      DB_PASSWORD: ${DB_PASSWORD:-sdn_staging_password}
+      DB_POOL_SIZE: 5
+      DB_MAX_OVERFLOW: 10
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      LOG_LEVEL: DEBUG
+      ENVIRONMENT: staging
+    ports:
+      - "${API_PORT:-8001}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - sdncheck_staging
+
+  # Redis for caching (optional staging component)
+  redis:
+    image: redis:7-alpine
+    container_name: sdncheck_redis_staging
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - sdncheck_staging
+
+  # Prometheus for metrics (staging monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: sdncheck_prometheus_staging
+    restart: always
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data_staging:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - sdncheck_staging
+    profiles:
+      - monitoring
+
+  # Grafana for dashboards (staging monitoring)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: sdncheck_grafana_staging
+    restart: always
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin_staging}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data_staging:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - sdncheck_staging
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data_staging:
+  prometheus_data_staging:
+  grafana_data_staging:
+
+networks:
+  sdncheck_staging:
+    driver: bridge
