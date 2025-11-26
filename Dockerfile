@@ -1,4 +1,5 @@
 # SDNCheck API Dockerfile
+# Copilot: Forzando rebuild para evitar cache en Railway
 # Multi-stage build for optimized production image
 
 # Stage 1: Build dependencies
