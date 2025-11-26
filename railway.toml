@@ -1,0 +1,21 @@
+# Railway Configuration for SDNCheck Multi-Service Deployment
+# This file configures the backend service (root directory)
+# For frontend, use the Railway dashboard to create a separate service pointing to ./frontend
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+numReplicas = 1
+startCommand = "python -m uvicorn python.api.server:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/api/v1/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# Environment variables reference (set in Railway dashboard):
+# DATABASE_URL - Provided by Railway PostgreSQL plugin
+# PORT - Automatically provided by Railway
+# CORS_ORIGINS - Set to your frontend Railway URL (e.g., https://sdncheck-frontend.up.railway.app)
+# API_KEY - Optional: Set for production API authentication

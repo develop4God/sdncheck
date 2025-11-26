@@ -37,7 +37,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-sdn_password}
       API_HOST: 0.0.0.0
       API_PORT: 8000
-      CORS_ORIGINS: http://localhost:3000,http://frontend:3000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://frontend:3000}
     ports:
       - "8000:8000"
     depends_on:

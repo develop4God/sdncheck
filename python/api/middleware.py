@@ -5,10 +5,11 @@ Provides CORS configuration, request logging, and global error handling.
 """
 
 import os
+import re
 import time
 import logging
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, List
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +32,30 @@ DEFAULT_CORS_ORIGINS = [
     "http://127.0.0.1:8000",
 ]
 
+# Railway subdomain pattern for wildcard matching
+RAILWAY_PATTERN = re.compile(r'^https://[\w-]+\.up\.railway\.app$')
+
+
+def is_origin_allowed(origin: str, allowed_origins: List[str]) -> bool:
+    """Check if origin is allowed, supporting wildcards for Railway domains.
+    
+    Args:
+        origin: The origin to check
+        allowed_origins: List of allowed origins (may include wildcards like *.railway.app)
+    
+    Returns:
+        True if origin is allowed
+    """
+    for allowed in allowed_origins:
+        # Exact match
+        if origin == allowed:
+            return True
+        # Wildcard match for Railway subdomains
+        if '*.up.railway.app' in allowed or '*.railway.app' in allowed:
+            if RAILWAY_PATTERN.match(origin):
+                return True
+    return False
+
 
 def setup_cors(app: FastAPI) -> None:
     """Configure CORS middleware for the application.
@@ -38,6 +63,7 @@ def setup_cors(app: FastAPI) -> None:
     Restricts origins to localhost for security.
     Origins can be customized via CORS_ORIGINS environment variable
     (comma-separated list of allowed origins).
+    Supports wildcard patterns for Railway subdomains (*.up.railway.app).
     """
     # Allow customization via environment variable
     cors_origins_env = os.getenv("CORS_ORIGINS", "")
@@ -46,14 +72,57 @@ def setup_cors(app: FastAPI) -> None:
     else:
         allowed_origins = DEFAULT_CORS_ORIGINS
     
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["X-Request-ID", "X-Processing-Time-MS"],
-    )
+    # Check if any wildcard patterns are present
+    has_wildcard = any('*' in origin for origin in allowed_origins)
+    
+    if has_wildcard:
+        # For wildcard support, we need to use allow_origin_regex or a custom validator
+        # Create regex pattern for Railway domains
+        regex_patterns = []
+        exact_origins = []
+        
+        for origin in allowed_origins:
+            if '*.up.railway.app' in origin:
+                # Convert wildcard to regex pattern for Railway subdomains
+                regex_patterns.append(r'https://[\w-]+\.up\.railway\.app')
+            elif '*.railway.app' in origin:
+                regex_patterns.append(r'https://[\w-]+\.railway\.app')
+            else:
+                exact_origins.append(origin)
+        
+        # Combine patterns
+        if regex_patterns:
+            combined_regex = '|'.join(f'({p})' for p in regex_patterns)
+            if exact_origins:
+                exact_escaped = '|'.join(re.escape(o) for o in exact_origins)
+                combined_regex = f'({combined_regex})|({exact_escaped})'
+            
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origin_regex=combined_regex,
+                allow_credentials=True,
+                allow_methods=["GET", "POST", "OPTIONS"],
+                allow_headers=["*"],
+                expose_headers=["X-Request-ID", "X-Processing-Time-MS"],
+            )
+        else:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=exact_origins,
+                allow_credentials=True,
+                allow_methods=["GET", "POST", "OPTIONS"],
+                allow_headers=["*"],
+                expose_headers=["X-Request-ID", "X-Processing-Time-MS"],
+            )
+    else:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["*"],
+            expose_headers=["X-Request-ID", "X-Processing-Time-MS"],
+        )
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

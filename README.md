@@ -50,50 +50,110 @@ docker-compose down -v
 
 ## Deploy to Railway
 
-### Option 1: One-Click Deploy
+Railway deployment uses a multi-service architecture with separate services for backend, frontend, and database.
 
-1. Create a Railway account at [railway.app](https://railway.app)
-2. Connect your GitHub repository
-3. Railway will auto-detect the configuration
+### Prerequisites
 
-### Option 2: Manual Setup
+- [Railway account](https://railway.app)
+- GitHub repository connected to Railway
 
-1. Install Railway CLI:
-   ```bash
-   npm install -g @railway/cli
+### Step 1: Create Railway Project
+
+1. Go to [Railway Dashboard](https://railway.app/dashboard)
+2. Click "New Project" → "Deploy from GitHub repo"
+3. Select the `sdncheck` repository
+
+### Step 2: Add PostgreSQL Database
+
+1. In your Railway project, click "New Service" → "Database" → "PostgreSQL"
+2. Railway will automatically create a PostgreSQL instance
+3. The `DATABASE_URL` environment variable will be available for other services
+
+### Step 3: Deploy Backend Service
+
+1. Click "New Service" → "GitHub Repo" → Select `sdncheck`
+2. Configure the service:
+   - **Name**: `backend`
+   - **Root Directory**: `/` (leave empty for root)
+   - **Dockerfile Path**: `Dockerfile`
+
+3. Set environment variables in the "Variables" tab:
+   ```
+   PORT=${{PORT}}
+   DATABASE_URL=${{Postgres.DATABASE_URL}}
+   CORS_ORIGINS=https://your-frontend.up.railway.app,https://*.up.railway.app
+   API_HOST=0.0.0.0
    ```
 
-2. Login and link project:
-   ```bash
-   railway login
-   railway init
+4. Railway will auto-detect the Dockerfile and deploy
+
+### Step 4: Deploy Frontend Service
+
+1. Click "New Service" → "GitHub Repo" → Select `sdncheck`
+2. Configure the service:
+   - **Name**: `frontend`
+   - **Root Directory**: `frontend`
+   - **Dockerfile Path**: `frontend/Dockerfile`
+
+3. Set build arguments in "Variables" tab:
+   ```
+   REACT_APP_API_URL=https://your-backend.up.railway.app
    ```
 
-3. Add PostgreSQL service:
-   - In Railway dashboard, add a PostgreSQL plugin
-   - Copy the `DATABASE_URL` to your backend service
+4. After backend deploys, update `REACT_APP_API_URL` with the actual backend URL
 
-4. Deploy:
-   ```bash
-   railway up
-   ```
+### Step 5: Configure Networking
 
-### Railway Services Setup
+1. For each service, go to "Settings" → "Networking"
+2. Click "Generate Domain" to create a public URL
+3. Update the frontend's `REACT_APP_API_URL` with the backend's domain
+4. Update the backend's `CORS_ORIGINS` with the frontend's domain
 
-Create 3 services in Railway:
+### Railway Environment Variables Reference
 
-1. **Backend** (Python API)
-   - Root directory: `/`
-   - Dockerfile: `Dockerfile`
-   - Environment variables: see below
+#### Backend Service
 
-2. **Frontend** (React)
-   - Root directory: `/frontend`
-   - Dockerfile: `/frontend/Dockerfile`
-   - Build args: `REACT_APP_API_URL=https://your-backend-url.railway.app`
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `PORT` | Auto-provided by Railway | `${{PORT}}` |
+| `DATABASE_URL` | PostgreSQL connection string | `${{Postgres.DATABASE_URL}}` |
+| `CORS_ORIGINS` | Allowed frontend origins | `https://frontend.up.railway.app` |
+| `API_HOST` | API bind address | `0.0.0.0` |
+| `API_KEY` | Optional API authentication | `your-secure-key` |
 
-3. **Database** (PostgreSQL)
-   - Add PostgreSQL from Railway plugins
+#### Frontend Service
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `REACT_APP_API_URL` | Backend API URL (build arg) | `https://backend.up.railway.app` |
+
+### CORS Configuration for Railway
+
+The backend supports wildcard CORS patterns for Railway's dynamic subdomains:
+
+```bash
+# Allow specific Railway subdomain
+CORS_ORIGINS=https://sdncheck-frontend.up.railway.app
+
+# Allow all Railway subdomains (development)
+CORS_ORIGINS=https://*.up.railway.app
+
+# Multiple origins
+CORS_ORIGINS=https://frontend.up.railway.app,https://*.up.railway.app,http://localhost:3000
+```
+
+### Troubleshooting
+
+1. **CORS errors**: Ensure `CORS_ORIGINS` includes your frontend's Railway URL
+2. **Database connection**: Verify `DATABASE_URL` is linked from PostgreSQL service
+3. **Port issues**: Railway provides `PORT` automatically - don't hardcode 8000
+4. **Build failures**: Check that root directory and Dockerfile path are correct
+
+### Local Development with Railway
+
+You can use the `.env.railway.example` files as reference:
+- Root: `.env.railway.example` - Backend configuration
+- Frontend: `frontend/.env.railway.example` - Frontend configuration
 
 ## Environment Variables
 

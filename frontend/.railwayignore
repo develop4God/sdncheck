@@ -1,0 +1,9 @@
+# Ignore files that don't need to be rebuilt on Railway
+node_modules/
+.git/
+.github/
+*.md
+*.log
+.env*
+.dockerignore
+docker-compose*.yml
