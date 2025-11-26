@@ -84,6 +84,9 @@ DEFAULT_CORS_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://127.0.0.1:8080",
     "http://127.0.0.1:8000",
+    # Railway production domains
+    "https://amiable-love-production.up.railway.app",
+    "https://sdncheck-production.up.railway.app",
 ]
 
 
@@ -136,64 +139,21 @@ def setup_cors(app: FastAPI) -> None:
         allowed_origins = DEFAULT_CORS_ORIGINS
 
     # Log para depuración
-    logger.info(f"[CORS] Configured origins: {allowed_origins}")
+    logger.info(f"[CORS] Configured origins from env: {cors_origins_env}")
+    logger.info(f"[CORS] Parsed allowed origins: {allowed_origins}")
 
-    # Check if any wildcard patterns are present
-    has_wildcard = any("*" in origin for origin in allowed_origins)
-
-    if has_wildcard:
-        # Build regex pattern that matches Railway subdomains
-        # Pattern: https://<any-subdomain>.up.railway.app
-        # Also include exact origins for localhost development
-        regex_parts = []
-        exact_origins = []
-        
-        for origin in allowed_origins:
-            origin = origin.strip()
-            if origin == "https://*.up.railway.app":
-                regex_parts.append(r"https://[\w-]+\.up\.railway\.app")
-            elif origin == "https://*.railway.app":
-                regex_parts.append(r"https://[\w-]+\.railway\.app")
-            elif "*" in origin:
-                # Skip other wildcards we don't support
-                logger.warning(f"[CORS] Unsupported wildcard pattern: {origin}")
-            else:
-                # Exact origin - escape for regex
-                regex_parts.append(re.escape(origin))
-                exact_origins.append(origin)
-        
-        if regex_parts:
-            combined_regex = "^(" + "|".join(regex_parts) + ")$"
-            logger.info(f"[CORS] Using regex pattern: {combined_regex}")
-            
-            app.add_middleware(
-                CORSMiddleware,
-                allow_origin_regex=combined_regex,
-                allow_credentials=True,
-                allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                allow_headers=["*"],
-                expose_headers=["X-Request-ID", "X-Processing-Time-MS"],
-            )
-        else:
-            logger.warning("[CORS] No valid origins found, using defaults")
-            app.add_middleware(
-                CORSMiddleware,
-                allow_origins=DEFAULT_CORS_ORIGINS,
-                allow_credentials=True,
-                allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                allow_headers=["*"],
-                expose_headers=["X-Request-ID", "X-Processing-Time-MS"],
-            )
-    else:
-        logger.info(f"[CORS] Using exact origins: {allowed_origins}")
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=allowed_origins,
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
-            expose_headers=["X-Request-ID", "X-Processing-Time-MS"],
-        )
+    # SOLUCIÓN TEMPORAL: Usar allow_origins=["*"] para depurar
+    # Si esto funciona, el problema está en el regex
+    # TODO: Cambiar a configuración segura después de confirmar que funciona
+    logger.info("[CORS] Using allow_origins=['*'] for debugging")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,  # No se puede usar credentials con "*"
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID", "X-Processing-Time-MS"],
+    )
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
