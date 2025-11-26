@@ -48,7 +48,7 @@ USER appuser
 ENV PATH=/home/appuser/.local/bin:$PATH
 
 # Environment variables (override in docker-compose or kubernetes)
-    # ...existing code...
+
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 API_HOST=0.0.0.0
 
