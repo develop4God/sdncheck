@@ -32,9 +32,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy installed packages from builder
 COPY --from=builder /root/.local /home/appuser/.local
 
-# Copy application code
-COPY python/ ./python/
-COPY scripts/ ./scripts/
+
+# Copy only the api module and other needed files to /app/python
+COPY python/api/ ./api/
+COPY python/config_manager.py ./config_manager.py
+COPY python/config.yaml ./config.yaml
+COPY python/create_test_db_schema.py ./create_test_db_schema.py
+COPY python/downloader.py ./downloader.py
+COPY python/enhanced_xml.txt ./enhanced_xml.txt
+COPY python/functional_test_db.py ./functional_test_db.py
+COPY python/load_initial_data.py ./load_initial_data.py
+COPY python/logo_base64.txt ./logo_base64.txt
+COPY python/OFAC_UN_List_DownloaderV1.0.1.py ./OFAC_UN_List_DownloaderV1.0.1.py
+COPY python/report_generator.py ./report_generator.py
+COPY python/requirements.txt ../requirements.txt
+COPY python/screener.py ./screener.py
+COPY python/security_logger.py ./security_logger.py
+COPY python/test_db_connection.py ./test_db_connection.py
+COPY python/UNfile_format.txt ./UNfile_format.txt
+COPY python/xml_utils.py ./xml_utils.py
+COPY python/alembic.ini ./alembic.ini
+COPY python/alembic/ ./alembic/
+COPY python/database/ ./database/
+COPY python/logs/ ./logs/
+COPY python/reports/ ./reports/
+COPY python/audit_log/ ./audit_log/
+COPY python/__pycache__/ ./__pycache__/
+COPY scripts/ ../scripts/
 
 # Set permissions
 RUN chown -R appuser:appuser /app \
