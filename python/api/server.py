@@ -120,9 +120,10 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# Setup middleware
-setup_cors(app)
+# Setup middleware - CORS debe agregarse DESPUÉS de otros middlewares
+# porque en Starlette/FastAPI el orden es inverso (último agregado = primero en ejecutar)
 app.add_middleware(RequestLoggingMiddleware)
+setup_cors(app)  # CORS se agrega último para que se ejecute primero
 setup_exception_handlers(app)
 
 
