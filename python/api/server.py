@@ -458,9 +458,9 @@ async def health_check(
         data_files = []
         oldest_file_time = None
 
-            # Initialize last update variables
-            ofac_last_updated = None
-            un_last_updated = None
+        # Initialize last update variables
+        ofac_last_updated = None
+        un_last_updated = None
 
         for pattern in ["*.xml", "*.zip"]:
             for f in data_dir.glob(pattern):
@@ -523,31 +523,31 @@ async def health_check(
             uptime = datetime.now(timezone.utc) - _startup_time
             uptime_seconds = int(uptime.total_seconds())
 
-            return HealthResponse(
-                status="healthy",
-                entities_loaded=entities_loaded,
-                data_files=data_files,
-                data_age_days=data_age_days,
-                algorithm_version=config.algorithm.version,
-                memory_usage_mb=memory_usage_mb,
-                uptime_seconds=uptime_seconds,
-                ofac_last_updated=ofac_last_updated,
-                un_last_updated=un_last_updated,
-            )
+        return HealthResponse(
+            status="healthy",
+            entities_loaded=entities_loaded,
+            data_files=data_files,
+            data_age_days=data_age_days,
+            algorithm_version=config.algorithm.version,
+            memory_usage_mb=memory_usage_mb,
+            uptime_seconds=uptime_seconds,
+            ofac_last_updated=ofac_last_updated,
+            un_last_updated=un_last_updated,
+        )
     except Exception as e:
         # Always return HTTP 200, but report error in JSON
-            return HealthResponse(
-                status="error",
-                entities_loaded=0,
-                data_files=[],
-                data_age_days=None,
-                algorithm_version="unknown",
-                memory_usage_mb=None,
-                uptime_seconds=None,
-                ofac_last_updated=None,
-                un_last_updated=None,
-                error_message=str(e),
-            )
+        return HealthResponse(
+            status="error",
+            entities_loaded=0,
+            data_files=[],
+            data_age_days=None,
+            algorithm_version="unknown",
+            memory_usage_mb=None,
+            uptime_seconds=None,
+            ofac_last_updated=None,
+            un_last_updated=None,
+            error_message=str(e),
+        )
 
 
 @app.post(
