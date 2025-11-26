@@ -443,70 +443,78 @@ async def health_check(
     screener: EnhancedSanctionsScreener = Depends(get_screener),
     config: ConfigManager = Depends(get_config_instance),
 ):
-    """Return health status including entity counts and data freshness."""
+    """Return health status including entity counts and data freshness. Always returns HTTP 200."""
     global _startup_time
-
-    # Get entity count
-    entities_loaded = len(screener.entities)
-
-    # Get data file info
-    data_dir = Path(DATA_DIR)
-    data_files = []
-    oldest_file_time = None
-
-    for pattern in ["*.xml", "*.zip"]:
-        for f in data_dir.glob(pattern):
-            try:
-                stat = f.stat()
-                modified_time = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-                data_files.append(
-                    DataFileInfo(
-                        filename=f.name,
-                        last_modified=modified_time.isoformat(),
-                        size_bytes=stat.st_size,
-                    )
-                )
-
-                if oldest_file_time is None or modified_time < oldest_file_time:
-                    oldest_file_time = modified_time
-            except Exception:
-                # Ignorar archivos inaccesibles o con errores de lectura (no afectan el cálculo de fecha más antigua)
-                pass
-
-    # Calculate data age
-    data_age_days = None
-    if oldest_file_time:
-        age = datetime.now(timezone.utc) - oldest_file_time
-        data_age_days = age.days
-
-    # Calculate memory usage
-    memory_usage_mb = None
     try:
-        import psutil
+        # Get entity count
+        entities_loaded = len(screener.entities)
 
-        process = psutil.Process()
-        memory_usage_mb = round(process.memory_info().rss / (1024 * 1024), 2)
-    except ImportError:
-        # Si psutil no está instalado, simplemente omitir el cálculo de uso de memoria
-        pass
-    except Exception:
-        pass
+        # Get data file info
+        data_dir = Path(DATA_DIR)
+        data_files = []
+        oldest_file_time = None
 
-    # Calculate uptime
-    uptime_seconds = None
-    if _startup_time:
-        uptime = datetime.now(timezone.utc) - _startup_time
-        uptime_seconds = int(uptime.total_seconds())
+        for pattern in ["*.xml", "*.zip"]:
+            for f in data_dir.glob(pattern):
+                try:
+                    stat = f.stat()
+                    modified_time = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                    data_files.append(
+                        DataFileInfo(
+                            filename=f.name,
+                            last_modified=modified_time.isoformat(),
+                            size_bytes=stat.st_size,
+                        )
+                    )
+                    if oldest_file_time is None or modified_time < oldest_file_time:
+                        oldest_file_time = modified_time
+                except Exception:
+                    pass
 
-    return HealthResponse(
-        status="healthy",
-        entities_loaded=entities_loaded,
-        data_files=data_files,
-        data_age_days=data_age_days,
-        algorithm_version=config.algorithm.version,
-        memory_usage_mb=memory_usage_mb,
-        uptime_seconds=uptime_seconds,
-    )
+        # Calculate data age
+        data_age_days = None
+        if oldest_file_time:
+            age = datetime.now(timezone.utc) - oldest_file_time
+            data_age_days = age.days
+
+        # Calculate memory usage
+        memory_usage_mb = None
+        try:
+            import psutil
+            process = psutil.Process()
+            memory_usage_mb = round(process.memory_info().rss / (1024 * 1024), 2)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Calculate uptime
+        uptime_seconds = None
+        if _startup_time:
+            uptime = datetime.now(timezone.utc) - _startup_time
+            uptime_seconds = int(uptime.total_seconds())
+
+        return HealthResponse(
+            status="healthy",
+            entities_loaded=entities_loaded,
+            data_files=data_files,
+            data_age_days=data_age_days,
+            algorithm_version=config.algorithm.version,
+            memory_usage_mb=memory_usage_mb,
+            uptime_seconds=uptime_seconds,
+        )
+    except Exception as e:
+        # Always return HTTP 200, but report error in JSON
+        return HealthResponse(
+            status="error",
+            entities_loaded=0,
+            data_files=[],
+            data_age_days=None,
+            algorithm_version="unknown",
+            memory_usage_mb=None,
+            uptime_seconds=None,
+            error_message=str(e),
+        )
 
 
 @app.post(
