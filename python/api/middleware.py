@@ -127,6 +127,20 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
         request_id = request.headers.get("X-Request-ID", str(time.time_ns()))
 
+        # Debug: log Origin and all headers
+        origin = request.headers.get("origin", "<no origin>")
+        logger.debug(f"[DEBUG] Incoming request Origin: {origin}")
+        logger.debug(f"[DEBUG] All headers: {dict(request.headers)}")
+        logger.debug(f"[DEBUG] Method: {request.method}")
+        logger.debug(f"[DEBUG] Path: {request.url.path}")
+        logger.debug(f"[DEBUG] Query params: {dict(request.query_params)}")
+        try:
+            if request.headers.get('content-type', '').startswith('application/json'):
+                body = await request.body()
+                logger.debug(f"[DEBUG] JSON body: {body.decode('utf-8')}")
+        except Exception as e:
+            logger.debug(f"[DEBUG] Error reading body: {e}")
+
         # Store request ID for later use
         request.state.request_id = request_id
         request.state.start_time = start_time
@@ -157,6 +171,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 processing_time_ms,
                 request_id,
             )
+            logger.debug(f"[DEBUG] Response status: {response.status_code}")
+            logger.debug(f"[DEBUG] Response headers: {dict(response.headers)}")
+            try:
+                if response.headers.get('content-type', '').startswith('application/json'):
+                    logger.debug(f"[DEBUG] Response body: {response.body.decode('utf-8')}")
+            except Exception as e:
+                logger.debug(f"[DEBUG] Error reading response body: {e}")
 
             return response
 
