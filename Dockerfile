@@ -48,9 +48,7 @@ USER appuser
 ENV PATH=/home/appuser/.local/bin:$PATH
 
 # Environment variables (override in docker-compose or kubernetes)
-    PYTHONDONTWRITEBYTECODE=1 \
-    API_HOST=0.0.0.0 \
-    API_PORT=8000
+    # ...existing code...
 
 # Expose API port
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 API_HOST=0.0.0.0 API_PORT=8080
