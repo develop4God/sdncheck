@@ -63,6 +63,12 @@ sqlalchemy>=2.0.23
 # PostgreSQL adapter
 psycopg2-binary>=2.9.9
 
+# Database migrations
+alembic>=1.13.0
+
+# Connection retry logic
+tenacity>=8.2.0
+
 # Redis client (for caching)
 redis>=5.0.1
 

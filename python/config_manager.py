@@ -110,6 +110,10 @@ class InputValidationConfig:
     blocked_characters: str = "<>{}[]|\\;`$"
 
 
+# Security constant for maximum allowed name length
+MAX_SAFE_NAME_LENGTH = 1000
+
+
 @dataclass
 class LoggingConfig:
     """Logging configuration"""
@@ -378,9 +382,52 @@ class ConfigManager:
         }
 
     def _validate(self) -> None:
-        """Validate configuration values (dummy implementation)"""
-        # TODO: Implement real validation logic if needed
-        pass
+        """Validate configuration values"""
+        errors = []
+        
+        # Validate matching weights sum to 1.0 (with tolerance)
+        weights_sum = sum(self.matching.weights.values())
+        if abs(weights_sum - 1.0) > 0.01:
+            errors.append(
+                f"Matching weights must sum to 1.0, got {weights_sum:.2f}. "
+                f"Weights: {self.matching.weights}"
+            )
+        
+        # Validate recommendation thresholds order: auto_clear < manual_review < auto_escalate
+        thresholds = self.reporting.recommendation_thresholds
+        # Get defaults from ReportingConfig dataclass
+        default_thresholds = ReportingConfig().recommendation_thresholds
+        auto_clear = thresholds.get('auto_clear', default_thresholds['auto_clear'])
+        manual_review = thresholds.get('manual_review', default_thresholds['manual_review'])
+        auto_escalate = thresholds.get('auto_escalate', default_thresholds['auto_escalate'])
+        
+        if not (auto_clear < manual_review < auto_escalate):
+            errors.append(
+                f"Recommendation thresholds must be in order: auto_clear < manual_review < auto_escalate. "
+                f"Got: auto_clear={auto_clear}, manual_review={manual_review}, auto_escalate={auto_escalate}"
+            )
+        
+        # Validate input validation config
+        if self.input_validation.name_min_length < 0:
+            errors.append(
+                f"name_min_length must be non-negative, got {self.input_validation.name_min_length}"
+            )
+        
+        if self.input_validation.name_max_length < self.input_validation.name_min_length:
+            errors.append(
+                f"name_max_length ({self.input_validation.name_max_length}) must be >= "
+                f"name_min_length ({self.input_validation.name_min_length})"
+            )
+        
+        if self.input_validation.name_max_length > MAX_SAFE_NAME_LENGTH:
+            errors.append(
+                f"name_max_length must be <= {MAX_SAFE_NAME_LENGTH} for security, "
+                f"got {self.input_validation.name_max_length}"
+            )
+        
+        # Raise error if any validation failed
+        if errors:
+            raise ConfigurationError("Configuration validation failed:\n- " + "\n- ".join(errors))
 
 
 def get_config(config_path: Optional[str] = None) -> ConfigManager:
