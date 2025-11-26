@@ -79,6 +79,17 @@ function HealthCheck({ onHealthUpdate }) {
           <span className="health-stat">
             v{health.algorithm_version}
           </span>
+          {/* NUEVO: Fechas de última actualización OFAC y UN */}
+          {health.ofac_last_updated && (
+            <span className="health-stat">
+              Última actualización OFAC: <strong>{new Date(health.ofac_last_updated).toLocaleString()}</strong>
+            </span>
+          )}
+          {health.un_last_updated && (
+            <span className="health-stat">
+              Última actualización UN: <strong>{new Date(health.un_last_updated).toLocaleString()}</strong>
+            </span>
+          )}
         </div>
       )}
       

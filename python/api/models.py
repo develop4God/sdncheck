@@ -180,6 +180,12 @@ class HealthResponse(BaseModel):
     uptime_seconds: Optional[int] = Field(
         default=None, description="Server uptime in seconds"
     )
+    ofac_last_updated: Optional[str] = Field(
+        default=None, description="Last update date/time for OFAC list (ISO 8601 or source format)"
+    )
+    un_last_updated: Optional[str] = Field(
+        default=None, description="Last update date/time for UN list (ISO 8601 or source format)"
+    )
 
 
 class DataUpdateResponse(BaseModel):
