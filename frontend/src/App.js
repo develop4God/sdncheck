@@ -18,12 +18,17 @@ function App() {
   const fetchHealth = async () => {
     try {
       const response = await fetch(`${API_URL}/api/v1/health`);
-      if (!response.ok) throw new Error('API not available');
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
       const data = await response.json();
       setHealth(data);
       setError(null);
     } catch (err) {
-      setError('Unable to connect to API');
+      const message = err.name === 'TypeError' 
+        ? 'Network error: Unable to reach API' 
+        : err.message;
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -47,11 +52,17 @@ function App() {
         }),
       });
 
-      if (!response.ok) throw new Error('Screening failed');
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Screening failed (${response.status}): ${errorText}`);
+      }
       const data = await response.json();
       setScreeningResult(data);
     } catch (err) {
-      setScreeningResult({ error: err.message });
+      const message = err.name === 'TypeError'
+        ? 'Network error: Unable to reach API'
+        : err.message;
+      setScreeningResult({ error: message });
     } finally {
       setScreeningLoading(false);
     }
