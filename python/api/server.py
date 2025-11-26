@@ -10,6 +10,7 @@ Usage:
 
 import os
 import time
+from fastapi import Request  # Added missing import for Request
 import uuid
 import logging
 import tempfile
