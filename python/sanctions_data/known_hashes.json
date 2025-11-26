@@ -1,0 +1,13 @@
+{
+  "ofac_enhanced.zip": {
+    "hash": "ce8796ec6ba83ec02b747c2d68bcd87fcbe6ac93d1e72c6eed6db141429e6969",
+    "timestamp": "2025-11-26T17:30:06.725242+00:00",
+    "verified": true
+  },
+  "ofac_enhanced.zip_history": [
+    {
+      "hash": "ce8796ec6ba83ec02b747c2d68bcd87fcbe6ac93d1e72c6eed6db141429e6969",
+      "timestamp": "2025-11-26T17:30:06.725242+00:00"
+    }
+  ]
+}
