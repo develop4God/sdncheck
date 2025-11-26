@@ -129,17 +129,17 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         # Debug: log Origin and all headers
         origin = request.headers.get("origin", "<no origin>")
-        logger.debug(f"[DEBUG] Incoming request Origin: {origin}")
-        logger.debug(f"[DEBUG] All headers: {dict(request.headers)}")
-        logger.debug(f"[DEBUG] Method: {request.method}")
-        logger.debug(f"[DEBUG] Path: {request.url.path}")
-        logger.debug(f"[DEBUG] Query params: {dict(request.query_params)}")
+        logger.info(f"[DEBUG] Incoming request Origin: {origin}")
+        logger.info(f"[DEBUG] All headers: {dict(request.headers)}")
+        logger.info(f"[DEBUG] Method: {request.method}")
+        logger.info(f"[DEBUG] Path: {request.url.path}")
+        logger.info(f"[DEBUG] Query params: {dict(request.query_params)}")
         try:
             if request.headers.get('content-type', '').startswith('application/json'):
                 body = await request.body()
-                logger.debug(f"[DEBUG] JSON body: {body.decode('utf-8')}")
+                logger.info(f"[DEBUG] JSON body: {body.decode('utf-8')}")
         except Exception as e:
-            logger.debug(f"[DEBUG] Error reading body: {e}")
+            logger.info(f"[DEBUG] Error reading body: {e}")
 
         # Store request ID for later use
         request.state.request_id = request_id
@@ -171,13 +171,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 processing_time_ms,
                 request_id,
             )
-            logger.debug(f"[DEBUG] Response status: {response.status_code}")
-            logger.debug(f"[DEBUG] Response headers: {dict(response.headers)}")
+            logger.info(f"[DEBUG] Response status: {response.status_code}")
+            logger.info(f"[DEBUG] Response headers: {dict(response.headers)}")
             try:
                 if response.headers.get('content-type', '').startswith('application/json'):
-                    logger.debug(f"[DEBUG] Response body: {response.body.decode('utf-8')}")
+                    logger.info(f"[DEBUG] Response body: {response.body.decode('utf-8')}")
             except Exception as e:
-                logger.debug(f"[DEBUG] Error reading response body: {e}")
+                logger.info(f"[DEBUG] Error reading response body: {e}")
 
             return response
 
