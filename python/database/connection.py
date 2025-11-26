@@ -377,6 +377,7 @@ class DatabaseSessionProvider:
             url,
             echo=self._settings.echo,
             poolclass=QueuePool,
+            connect_args={"options": "-c statement_timeout=30000"},
             **pool_settings
         )
         

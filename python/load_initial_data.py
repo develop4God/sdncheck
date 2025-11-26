@@ -218,9 +218,10 @@ def main():
         logger.info("\n" + "=" * 50)
         logger.info("Initial data loading complete!")
         logger.info("=" * 50)
-        
     except Exception as e:
         logger.error(f"Error loading initial data: {e}")
+        if 'session' in locals():
+            session.rollback()
         raise
     finally:
         close_db()

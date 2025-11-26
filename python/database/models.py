@@ -648,6 +648,7 @@ class ScreeningRequest(Base, TimestampMixin):
         Index('ix_screening_request_date', 'created_at'),
         Index('ix_screening_request_status_date', 'status', 'created_at'),
         Index('ix_screening_request_analyst', 'analyst_id', 'created_at'),
+        UniqueConstraint('screened_name', 'screened_document', 'created_at', name='uq_screening_unique'),
     )
     
     def __repr__(self) -> str:

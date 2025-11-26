@@ -19,6 +19,8 @@ services:
     ports:
       # Mapea el puerto del contenedor (5432) al puerto de tu máquina local (5432)
       - "5432:5432"
+        # (Producción) No exponer el puerto de la base de datos
+        # - "5432:5432"  # Descomentar solo para desarrollo
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sdn_user -d sdn_database"]
       interval: 10s
