@@ -298,7 +298,7 @@ class EnhancedSanctionsDownloader:
             config: Configuration manager instance
         """
         self.config = config or get_config()
-        self.data_dir = Path(self.config.data.data_directory)
+        self.data_dir = Path(__file__).parent / self.config.data.data_directory
         self.data_dir.mkdir(exist_ok=True)
 
         self._namespace: Optional[str] = None

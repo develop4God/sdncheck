@@ -52,7 +52,7 @@ COPY python/alembic.ini ./alembic.ini
 COPY python/alembic/ ./alembic/
 COPY python/database/ ./database/
 COPY scripts/ ../scripts/
-COPY sanctions_data/ ./sanctions_data/
+COPY python/sanctions_data/ ./sanctions_data/
 
 # Set permissions
 RUN chown -R appuser:appuser /app

@@ -213,7 +213,7 @@ class ScreeningResult:
 class ReportMetadataCollector:
     """Collects metadata from sanctions data files"""
 
-    def __init__(self, data_dir: Path = Path("sanctions_data")):
+    def __init__(self, data_dir: Path = Path(__file__).parent / "sanctions_data"):
         self.data_dir = Path(data_dir)
 
     def get_file_hash(self, filepath: Path) -> str:
@@ -430,7 +430,7 @@ class ConstanciaReportGenerator:
     def __init__(
         self,
         output_dir: Path = Path("reports"),
-        data_dir: Path = Path("sanctions_data"),
+        data_dir: Path = Path(__file__).parent / "sanctions_data",
         validate_before_generate: bool = True,
     ):
         self.output_dir = Path(output_dir)

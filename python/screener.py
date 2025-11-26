@@ -276,7 +276,7 @@ class EnhancedSanctionsScreener:
             data_dir: Directory containing sanctions data files
         """
         self.config = config or get_config()
-        self.data_dir = Path(data_dir)
+        self.data_dir = Path(__file__).parent / data_dir
         self.entities: List[Dict[str, Any]] = []
         # Document index for fast lookup
         self._document_index: Dict[str, List[Dict[str, Any]]] = {}
