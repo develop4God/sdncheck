@@ -60,4 +60,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${PORT}/api/v1/health || exit 1
 
 # Default command - Run the FastAPI server with uvicorn using PORT
-CMD python -m uvicorn python.api.server:app --host 0.0.0.0 --port ${PORT}
+CMD echo "PORT is $PORT" && python -m uvicorn python.api.server:app --host 0.0.0.0 --port $PORT
