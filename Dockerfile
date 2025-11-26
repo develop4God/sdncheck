@@ -43,7 +43,6 @@ COPY python/enhanced_xml.txt ./enhanced_xml.txt
 COPY python/functional_test_db.py ./functional_test_db.py
 COPY python/load_initial_data.py ./load_initial_data.py
 COPY python/logo_base64.txt ./logo_base64.txt
-COPY python/OFAC_UN_List_DownloaderV1.0.1.py ./OFAC_UN_List_DownloaderV1.0.1.py
 COPY python/report_generator.py ./report_generator.py
 COPY python/requirements.txt ../requirements.txt
 COPY python/screener.py ./screener.py
