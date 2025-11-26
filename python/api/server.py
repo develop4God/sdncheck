@@ -39,6 +39,8 @@ from api.middleware import (
     setup_cors,
     setup_exception_handlers,
     RequestLoggingMiddleware,
+    get_recent_connection_logs,
+    get_connection_log_file_content,
 )
 from screener import EnhancedSanctionsScreener, InputValidationError
 from config_manager import get_config, ConfigManager, ConfigurationError
@@ -595,6 +597,58 @@ async def root():
     from fastapi.responses import RedirectResponse
 
     return RedirectResponse(url="/api/docs")
+
+
+# ============================================================================
+# ENDPOINTS DE DEPURACIÓN DE CONEXIÓN
+# ============================================================================
+
+@app.get(
+    "/api/v1/debug/connection-logs",
+    summary="Connection Debug Logs",
+    description="Returns recent connection logs for debugging frontend-backend issues",
+    tags=["Debug"],
+)
+async def get_connection_logs(limit: int = 50):
+    """Retorna los últimos logs de conexión frontend-backend."""
+    logs = get_recent_connection_logs(limit)
+    return {
+        "total_logs": len(logs),
+        "logs": logs,
+        "info": "Use this endpoint to debug CORS and connection issues"
+    }
+
+
+@app.get(
+    "/api/v1/debug/connection-logs/file",
+    summary="Connection Log File Content",
+    description="Returns raw content from the connection log file",
+    tags=["Debug"],
+)
+async def get_connection_log_file(lines: int = 100):
+    """Retorna el contenido del archivo de log de conexiones."""
+    content = get_connection_log_file_content(lines)
+    return {
+        "lines_requested": lines,
+        "content": content
+    }
+
+
+@app.get(
+    "/api/v1/debug/cors-test",
+    summary="CORS Test Endpoint",
+    description="Simple endpoint to test CORS configuration",
+    tags=["Debug"],
+)
+async def cors_test(request: Request):
+    """Endpoint simple para probar configuración CORS."""
+    origin = request.headers.get("origin", "<no origin>")
+    return {
+        "message": "CORS test successful",
+        "your_origin": origin,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "headers_received": dict(request.headers)
+    }
 
 
 if __name__ == "__main__":
