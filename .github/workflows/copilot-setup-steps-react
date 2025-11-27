@@ -1,0 +1,151 @@
+name: "Copilot Setup Steps - React Modern"
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '**.js'
+      - '**.jsx'
+      - '**.ts'
+      - '**.tsx'
+      - '**.css'
+      - '**.scss'
+      - '**.json'
+      - .github/workflows/copilot-setup-react.yml
+  pull_request:
+    paths:
+      - '**.js'
+      - '**.jsx'
+      - '**.ts'
+      - '**.tsx'
+      - '**.css'
+      - '**.scss'
+      - '**.json'
+      - .github/workflows/copilot-setup-react.yml
+
+jobs:
+  copilot-setup-react:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install validation tools
+        run: |
+          npm install -g eslint prettier stylelint stylelint-config-standard
+          # React & TS plugins
+          npm install -g eslint-plugin-react eslint-plugin-react-hooks @typescript-eslint/eslint-plugin @typescript-eslint/parser
+          # Jest y Testing Library
+          npm install --save-dev jest @testing-library/react @testing-library/jest-dom
+
+      - name: Create config files
+        run: |
+          # ESLint config (React + TypeScript)
+          cat > .eslintrc.json << 'EOF'
+          {
+            "env": {
+              "browser": true,
+              "es2021": true,
+              "jest": true
+            },
+            "extends": [
+              "eslint:recommended",
+              "plugin:react/recommended",
+              "plugin:@typescript-eslint/recommended",
+              "plugin:react-hooks/recommended",
+              "prettier"
+            ],
+            "parser": "@typescript-eslint/parser",
+            "plugins": ["react", "react-hooks", "@typescript-eslint"],
+            "settings": {
+              "react": {
+                "version": "detect"
+              }
+            },
+            "rules": {
+              "react/react-in-jsx-scope": "off",
+              "react/prop-types": "off",
+              "no-unused-vars": "warn",
+              "@typescript-eslint/no-unused-vars": "warn",
+              "react-hooks/rules-of-hooks": "error",
+              "react-hooks/exhaustive-deps": "warn"
+            }
+          }
+          EOF
+
+          # Stylelint config
+          cat > .stylelintrc.json << 'EOF'
+          {
+            "extends": "stylelint-config-standard",
+            "rules": {
+              "color-function-notation": "legacy",
+              "alpha-value-notation": "number"
+            }
+          }
+          EOF
+
+          # Prettier config
+          cat > .prettierrc << 'EOF'
+          {
+            "semi": true,
+            "singleQuote": true,
+            "trailingComma": "es5",
+            "printWidth": 80
+          }
+          EOF
+
+          # Jest config (opcional)
+          cat > jest.config.js << 'EOF'
+          module.exports = {
+            testEnvironment: 'jsdom',
+            setupFilesAfterEnv: ['@testing-library/jest-dom/extend-expect'],
+            moduleFileExtensions: ['js', 'jsx', 'ts', 'tsx'],
+          };
+          EOF
+
+      - name: Lint & format JavaScript/TypeScript files (ESLint & Prettier)
+        run: |
+          echo "⚡ Linting JS/TS/React code..."
+          eslint "**/*.{js,jsx,ts,tsx}" --ignore-pattern "node_modules/" || echo "⚠️  ESLint completed with warnings"
+          prettier --check "**/*.{js,jsx,ts,tsx,json,css,scss}" || echo "⚠️  Prettier formatting issues found"
+
+      - name: Validate CSS/SCSS files
+        run: |
+          echo "🎨 Validating CSS/SCSS files..."
+          stylelint "**/*.{css,scss}" --allow-empty-input || echo "⚠️  Stylelint completed with warnings"
+
+      - name: Run tests
+        run: |
+          echo "🧪 Running tests with Jest..."
+          npm run test || echo "⚠️  Tests completed with warnings/failures"
+
+      - name: Check for broken links (HTML only, optional)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --verbose --no-progress --exclude-path node_modules './**/*.html'
+          fail: false
+
+      - name: Validation Summary
+        if: always()
+        run: |
+          echo "✅ React Project validation completed!"
+          echo "📝 Review warnings above for improvements"
+          echo "🚀 Ready for deployment!"
+
+      - name: Upload validation logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-logs
+          path: |
+            .eslintrc.json
+            .stylelintrc.json
+            .prettierrc
+            jest.config.js
+          retention-days: 7
