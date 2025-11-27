@@ -2,15 +2,23 @@
 FastAPI Sanctions Screening API Server
 
 Provides REST API endpoints for sanctions screening functionality.
-Wraps the existing Python screening engine for Electron frontend integration.
+Supports two data modes:
+1. XML Mode (default): Loads entities from XML files at startup
+2. Database Mode: Queries PostgreSQL database for screening (preferred for production)
+
+The mode is controlled by the USE_DATABASE environment variable.
 
 Usage:
+    # XML mode (default)
     uvicorn api.server:app --reload --port 8000
+    
+    # Database mode
+    USE_DATABASE=true uvicorn api.server:app --reload --port 8000
 """
 
 import os
 import time
-from fastapi import Request  # Added missing import for Request
+from fastapi import Request
 import uuid
 import logging
 import tempfile
@@ -18,7 +26,8 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Security
 from fastapi.security import APIKeyHeader
@@ -44,7 +53,7 @@ from api.middleware import (
     get_connection_log_file_content,
 )
 from screener import EnhancedSanctionsScreener, InputValidationError
-from config_manager import get_config, ConfigManager, ConfigurationError
+from config_manager import ConfigManager, ConfigurationError, init_config, get_config_dependency
 from downloader import EnhancedSanctionsDownloader
 
 # Setup logging
@@ -60,13 +69,17 @@ DATA_DIR = os.getenv("DATA_DIR", "sanctions_data")
 MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "10"))
 CONFIG_PATH = os.getenv("CONFIG_PATH", "config.yaml")
 API_KEY = os.getenv("API_KEY", "")  # Required for authenticated endpoints
+USE_DATABASE = os.getenv("USE_DATABASE", "false").lower() in ("true", "1", "yes")
+DATABASE_URL = os.getenv("DATABASE_URL", "")  # Railway provides this
 
-# Global state
+# Global state for dependency injection
 _screener: Optional[EnhancedSanctionsScreener] = None
 _config: Optional[ConfigManager] = None
 _startup_time: Optional[datetime] = None
 _screener_lock = asyncio.Lock()  # Lock for atomic screener updates
 _executor = ThreadPoolExecutor(max_workers=2)  # For blocking I/O operations
+_db_provider = None  # Database provider for PostgreSQL mode
+_data_mode: str = "xml"  # Either "xml" or "database"
 
 # API Key security scheme
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -93,7 +106,11 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
 
 
 def get_screener() -> EnhancedSanctionsScreener:
-    """Dependency to get the screener instance."""
+    """Dependency to get the screener instance (XML mode).
+    
+    This function provides the screener for XML-based screening.
+    For database mode, see get_database_screening_service().
+    """
     global _screener
     if _screener is None:
         raise HTTPException(
@@ -103,11 +120,42 @@ def get_screener() -> EnhancedSanctionsScreener:
 
 
 def get_config_instance() -> ConfigManager:
-    """Dependency to get the config instance."""
+    """Dependency to get the config instance.
+    
+    Returns the global ConfigManager instance, initializing it if needed.
+    """
     global _config
     if _config is None:
-        _config = get_config(CONFIG_PATH)
+        _config = ConfigManager(CONFIG_PATH)
     return _config
+
+
+def get_database_screening_service():
+    """
+    Dependency to get a DatabaseScreeningService instance.
+    
+    Only available when USE_DATABASE=true.
+    Provides a database session-scoped screening service.
+    """
+    global _db_provider, _config
+    
+    if _db_provider is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Database mode not enabled. Set USE_DATABASE=true to use PostgreSQL."
+        )
+    
+    from database.screening_service import DatabaseScreeningService
+    
+    # Use session_scope context manager for proper cleanup
+    with _db_provider.session_scope() as session:
+        yield DatabaseScreeningService(session, _config)
+
+
+def get_data_mode() -> str:
+    """Get the current data mode ('xml' or 'database')."""
+    global _data_mode
+    return _data_mode
 
 
 # Create FastAPI application
@@ -129,36 +177,88 @@ setup_exception_handlers(app)
 
 @app.on_event("startup")
 async def startup():
-    """Initialize screener and load sanctions data on startup."""
-    global _screener, _config, _startup_time
+    """Initialize screener and load sanctions data on startup.
+    
+    Supports two modes:
+    1. XML Mode (default): Loads entities from XML files
+    2. Database Mode (USE_DATABASE=true): Uses PostgreSQL for screening
+    """
+    global _screener, _config, _startup_time, _db_provider, _data_mode
 
     logger.info("🚀 Starting Sanctions Screening API...")
     start_time = time.time()
 
     try:
-        # Load configuration
-        _config = get_config(CONFIG_PATH)
+        # Load configuration (using DI pattern)
+        _config = ConfigManager(CONFIG_PATH)
         logger.info(f"✓ Configuration loaded from {CONFIG_PATH}")
+        
+        # Check if we should use database mode
+        if USE_DATABASE or DATABASE_URL:
+            logger.info("🔧 Database mode enabled, initializing PostgreSQL connection...")
+            try:
+                from database.connection import DatabaseSessionProvider, DatabaseSettings
+                from database.screening_service import DatabaseScreeningService
+                
+                # Configure database settings
+                if DATABASE_URL:
+                    # Railway-style DATABASE_URL
+                    logger.info("Using DATABASE_URL from environment")
+                    settings = DatabaseSettings()  # Will use DATABASE_URL if set
+                else:
+                    # Use individual env vars or config
+                    settings = DatabaseSettings.from_env()
+                
+                _db_provider = DatabaseSessionProvider(settings=settings)
+                _db_provider.init()
+                
+                # Test connection and get entity count
+                if _db_provider.health_check():
+                    with _db_provider.session_scope() as session:
+                        service = DatabaseScreeningService(session, _config)
+                        entity_count = service.get_entity_count()
+                        counts_by_source = service.get_entity_count_by_source()
+                    
+                    _data_mode = "database"
+                    logger.info(f"✓ Database mode active: {entity_count} entities in PostgreSQL")
+                    for source, count in counts_by_source.items():
+                        logger.info(f"  - {source}: {count} entities")
+                else:
+                    logger.warning("⚠ Database connection failed, falling back to XML mode")
+                    _data_mode = "xml"
+                    _db_provider = None
+                    
+            except ImportError as e:
+                logger.warning(f"⚠ Database dependencies not available ({e}), using XML mode")
+                _data_mode = "xml"
+            except Exception as e:
+                logger.warning(f"⚠ Database initialization failed ({e}), falling back to XML mode")
+                _data_mode = "xml"
+                _db_provider = None
+        
+        # If not in database mode, use XML mode
+        if _data_mode == "xml":
+            logger.info("🔧 XML mode: Loading entities from XML files...")
+            # Initialize screener with XML data
+            _screener = EnhancedSanctionsScreener(config=_config, data_dir=DATA_DIR)
 
-        # Initialize screener
-        _screener = EnhancedSanctionsScreener(config=_config, data_dir=DATA_DIR)
+            # Load OFAC and UN data in executor to avoid blocking event loop
+            loop = asyncio.get_event_loop()
 
-        # Load OFAC and UN data in executor to avoid blocking event loop
-        loop = asyncio.get_event_loop()
+            ofac_count = await loop.run_in_executor(_executor, _screener.load_ofac)
+            logger.info(f"✓ Loaded {ofac_count} OFAC entities from XML")
 
-        ofac_count = await loop.run_in_executor(_executor, _screener.load_ofac)
-        logger.info(f"✓ Loaded {ofac_count} OFAC entities")
+            un_count = await loop.run_in_executor(_executor, _screener.load_un)
+            logger.info(f"✓ Loaded {un_count} UN entities from XML")
 
-        un_count = await loop.run_in_executor(_executor, _screener.load_un)
-        logger.info(f"✓ Loaded {un_count} UN entities")
+            total_entities = len(_screener.entities)
+            logger.info(f"✓ Total entities loaded: {total_entities}")
 
-        total_entities = len(_screener.entities)
         elapsed = time.time() - start_time
-
         _startup_time = datetime.now(timezone.utc)
 
         logger.info(
-            "✓ API ready: %d entities loaded in %.2f seconds", total_entities, elapsed
+            "✓ API ready in %.2f seconds (mode: %s)", elapsed, _data_mode
         )
 
     except ConfigurationError as e:
@@ -172,7 +272,17 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     """Cleanup on shutdown."""
+    global _db_provider
+    
     logger.info("Shutting down Sanctions Screening API...")
+    
+    # Close database provider if active
+    if _db_provider is not None:
+        try:
+            _db_provider.close()
+            logger.info("✓ Database connection closed")
+        except Exception as e:
+            logger.warning(f"⚠ Error closing database connection: {e}")
 
 
 def _transform_match_to_response(match_dict: dict) -> MatchDetail:
@@ -236,28 +346,53 @@ def _transform_match_to_response(match_dict: dict) -> MatchDetail:
 )
 async def screen_individual(
     request: ScreeningRequest,
-    screener: EnhancedSanctionsScreener = Depends(get_screener),
     api_key: str = Depends(verify_api_key),
 ):
     """Screen an individual against sanctions lists.
 
     This endpoint validates input, calls the screener, and returns matches.
+    Supports both XML mode (default) and Database mode (USE_DATABASE=true).
     Requires API key authentication via X-API-Key header.
     """
+    global _data_mode, _screener, _db_provider, _config
+    
     start_time = time.time()
 
     try:
-        # Call screener
-        result = screener.screen_individual(
-            name=request.name,
-            document=request.document_number,
-            document_type=request.document_type,
-            date_of_birth=request.date_of_birth,
-            nationality=request.nationality,
-            country=request.country,
-            analyst=request.analyst,
-            generate_report=False,  # Don't generate files for API calls
-        )
+        # Use the appropriate screening method based on data mode
+        if _data_mode == "database" and _db_provider is not None:
+            # Database mode: use PostgreSQL
+            from database.screening_service import DatabaseScreeningService
+            
+            with _db_provider.session_scope() as session:
+                service = DatabaseScreeningService(session, _config)
+                result = service.screen_individual(
+                    name=request.name,
+                    document=request.document_number,
+                    document_type=request.document_type,
+                    date_of_birth=request.date_of_birth,
+                    nationality=request.nationality,
+                    country=request.country,
+                    analyst=request.analyst,
+                    generate_report=False,
+                )
+        else:
+            # XML mode: use in-memory screener
+            if _screener is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Screener not initialized. Service is starting up."
+                )
+            result = _screener.screen_individual(
+                name=request.name,
+                document=request.document_number,
+                document_type=request.document_type,
+                date_of_birth=request.date_of_birth,
+                nationality=request.nationality,
+                country=request.country,
+                analyst=request.analyst,
+                generate_report=False,
+            )
 
         # Transform matches to response format
         matches = [_transform_match_to_response(m) for m in result.get("matches", [])]
@@ -444,14 +579,26 @@ async def bulk_screen(
     description="Check service health and data status",
 )
 async def health_check(
-    screener: EnhancedSanctionsScreener = Depends(get_screener),
     config: ConfigManager = Depends(get_config_instance),
 ):
     """Return health status including entity counts and data freshness. Always returns HTTP 200."""
-    global _startup_time
+    global _startup_time, _data_mode, _screener, _db_provider
     try:
-        # Get entity count
-        entities_loaded = len(screener.entities)
+        # Get entity count based on data mode
+        entities_loaded = 0
+        
+        if _data_mode == "database" and _db_provider is not None:
+            # Database mode
+            try:
+                from database.screening_service import DatabaseScreeningService
+                with _db_provider.session_scope() as session:
+                    service = DatabaseScreeningService(session, config)
+                    entities_loaded = service.get_entity_count()
+            except Exception as e:
+                logger.warning(f"Failed to get entity count from database: {e}")
+        elif _screener is not None:
+            # XML mode
+            entities_loaded = len(_screener.entities)
 
         # Get data file info
         data_dir = Path(DATA_DIR)
@@ -681,6 +828,44 @@ async def cors_test(request: Request):
         "your_origin": origin,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "headers_received": dict(request.headers)
+    }
+
+
+@app.get(
+    "/api/v1/debug/data-mode",
+    summary="Data Mode Info",
+    description="Returns information about the current data mode (XML or Database)",
+    tags=["Debug"],
+)
+async def data_mode_info():
+    """Returns current data mode and configuration."""
+    global _data_mode, _db_provider, _screener
+    
+    db_connected = False
+    db_entities = 0
+    xml_entities = 0
+    
+    if _data_mode == "database" and _db_provider is not None:
+        try:
+            from database.screening_service import DatabaseScreeningService
+            with _db_provider.session_scope() as session:
+                service = DatabaseScreeningService(session, _config)
+                db_entities = service.get_entity_count()
+                db_connected = True
+        except Exception:
+            pass
+    
+    if _screener is not None:
+        xml_entities = len(_screener.entities)
+    
+    return {
+        "data_mode": _data_mode,
+        "database_connected": db_connected,
+        "database_entities": db_entities,
+        "xml_entities": xml_entities,
+        "use_database_env": USE_DATABASE,
+        "database_url_set": bool(DATABASE_URL),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 

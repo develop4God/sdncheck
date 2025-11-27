@@ -1,39 +1,69 @@
-# DatabaseManager → DatabaseSessionProvider Migration Guide
+# Singleton to Dependency Injection Migration Guide
 
-This guide documents the migration path from the deprecated `DatabaseManager` singleton to the new `DatabaseSessionProvider` dependency injection pattern.
+This guide documents the migration path from deprecated singleton patterns to modern dependency injection patterns for improved testability and maintainability.
 
 ## Timeline
 
 | Phase | Sprint | Description |
 |-------|--------|-------------|
-| Phase 1 | N+1 | Identify all `DatabaseManager` usages |
+| Phase 1 | N+1 | Identify all singleton usages |
 | Phase 2 | N+2 | Migrate critical paths to DI pattern |
-| Phase 3 | N+3 | Remove `DatabaseManager` entirely |
+| Phase 3 | N+3 | Remove deprecated singletons entirely |
 
 ---
 
 ## Why Migrate?
 
-The `DatabaseManager` singleton has several drawbacks:
+Singleton patterns have several drawbacks:
 
 1. **Hard to test**: Singletons create global state that's difficult to mock
-2. **Hidden dependencies**: Components don't declare their database needs explicitly
-3. **No lifecycle control**: Hard to manage connection pooling per-request
+2. **Hidden dependencies**: Components don't declare their needs explicitly
+3. **No lifecycle control**: Hard to manage resources per-request
 4. **Thread safety concerns**: Shared mutable state across threads
 
-The new `DatabaseSessionProvider` with dependency injection solves these issues:
+Dependency injection solves these issues:
 
-1. **Testable**: Inject mock sessions in tests
+1. **Testable**: Inject mock dependencies in tests
 2. **Explicit dependencies**: FastAPI `Depends()` makes dependencies clear
-3. **Per-request lifecycle**: Sessions created/closed per request automatically
-4. **Thread-safe**: Each request gets its own session
+3. **Per-request lifecycle**: Resources created/closed per request automatically
+4. **Thread-safe**: Each request gets its own instance
 
 ---
 
-## Code Migration Pattern
+## Deprecated Patterns
 
-### Before (Deprecated)
+### 1. ConfigManager Singleton
 
+**Before (Deprecated)**:
+```python
+from config_manager import get_config, ConfigManager
+
+# Using singleton function
+config = get_config()
+
+# Using singleton method
+config = ConfigManager.get_instance()
+```
+
+**After (Recommended)**:
+```python
+from config_manager import ConfigManager, get_config_dependency
+
+# Direct instantiation (preferred for DI)
+config = ConfigManager("config.yaml")
+
+# Factory method
+config = ConfigManager.create("config.yaml")
+
+# FastAPI dependency
+@app.get("/settings")
+def get_settings(config: ConfigManager = Depends(get_config_dependency)):
+    return {"version": config.algorithm.version}
+```
+
+### 2. DatabaseManager Singleton
+
+**Before (Deprecated)**:
 ```python
 from database.connection import DatabaseManager, get_db_manager
 
@@ -41,16 +71,9 @@ from database.connection import DatabaseManager, get_db_manager
 db = DatabaseManager()
 with db.session() as session:
     entities = session.query(SanctionedEntity).all()
-
-# Using global function
-db = get_db_manager()
-session = db.get_session()
 ```
 
-### After (Recommended)
-
-#### Option 1: FastAPI Dependency Injection (Preferred)
-
+**After (Recommended)**:
 ```python
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -60,6 +83,31 @@ from database.connection import get_db
 def get_entities(db: Session = Depends(get_db)):
     repo = SanctionedEntityRepository(db)
     return repo.list_all()
+```
+
+---
+
+## Data Mode: XML vs Database
+
+The API now supports two data modes:
+
+### XML Mode (Default)
+- Loads entities from XML files at startup
+- Good for development and testing
+- Data stored in memory
+
+### Database Mode (Production)
+- Queries PostgreSQL for screening
+- Set `USE_DATABASE=true` environment variable
+- Data stored in PostgreSQL with trigram search
+
+```bash
+# Enable database mode
+export USE_DATABASE=true
+export DATABASE_URL=postgresql://user:pass@host:5432/dbname
+
+# Start server
+uvicorn api.server:app --host 0.0.0.0 --port 8000
 ```
 
 #### Option 2: Unit of Work Pattern (For Complex Transactions)
