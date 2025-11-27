@@ -16,6 +16,7 @@ restartPolicyMaxRetries = 3
 
 # Environment variables reference (set in Railway dashboard):
 # DATABASE_URL - Provided by Railway PostgreSQL plugin
+# USE_DATABASE - Set to "true" to enable PostgreSQL mode (recommended for production)
 # PORT - Automatically provided by Railway
 # CORS_ORIGINS - Set to your frontend Railway URL (e.g., https://sdncheck-frontend.up.railway.app)
 # API_KEY - Optional: Set for production API authentication

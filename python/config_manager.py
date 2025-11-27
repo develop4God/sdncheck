@@ -371,7 +371,24 @@ class ConfigManager:
 
     @classmethod
     def get_instance(cls, config_path: Optional[str] = None) -> "ConfigManager":
-        """Get singleton instance of ConfigManager"""
+        """
+        DEPRECATED: Get singleton instance of ConfigManager.
+        
+        For new code, prefer creating a ConfigManager instance directly
+        and passing it via dependency injection:
+        
+            config = ConfigManager(config_path)
+            screener = EnhancedSanctionsScreener(config=config)
+        
+        This singleton method is maintained for backward compatibility.
+        """
+        import warnings
+        warnings.warn(
+            "ConfigManager.get_instance() is deprecated. "
+            "Create ConfigManager instances directly and pass via dependency injection.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if cls._instance is None:
             cls._instance = ConfigManager(config_path)
         return cls._instance
@@ -380,6 +397,22 @@ class ConfigManager:
     def reset_instance(cls) -> None:
         """Reset singleton instance (useful for testing)"""
         cls._instance = None
+    
+    @classmethod
+    def create(cls, config_path: Optional[str] = None) -> "ConfigManager":
+        """
+        Create a new ConfigManager instance (preferred for DI).
+        
+        Use this factory method instead of get_instance() for better testability
+        and dependency injection support.
+        
+        Args:
+            config_path: Path to config.yaml file
+            
+        Returns:
+            New ConfigManager instance
+        """
+        return cls(config_path)
 
     def to_dict(self) -> Dict[str, Any]:
         """Export configuration as dictionary"""
@@ -477,5 +510,75 @@ class ConfigManager:
 
 
 def get_config(config_path: Optional[str] = None) -> ConfigManager:
-    """Convenience function to get configuration instance"""
+    """
+    DEPRECATED: Convenience function to get configuration instance.
+    
+    For new code, prefer creating ConfigManager instances directly:
+    
+        config = ConfigManager.create(config_path)
+        # or simply
+        config = ConfigManager(config_path)
+    
+    This function is maintained for backward compatibility.
+    """
+    import warnings
+    warnings.warn(
+        "get_config() is deprecated. Use ConfigManager.create() or ConfigManager() directly.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return ConfigManager.get_instance(config_path)
+
+
+# FastAPI Dependency Injection Support
+_config_instance: Optional[ConfigManager] = None
+
+
+def init_config(config_path: Optional[str] = None) -> ConfigManager:
+    """
+    Initialize the global config instance for dependency injection.
+    
+    Call this during application startup.
+    
+    Args:
+        config_path: Path to config.yaml file
+        
+    Returns:
+        ConfigManager instance
+    """
+    global _config_instance
+    _config_instance = ConfigManager(config_path)
+    return _config_instance
+
+
+def get_config_dependency() -> ConfigManager:
+    """
+    FastAPI dependency for getting configuration.
+    
+    Usage in FastAPI:
+        @app.get("/endpoint")
+        def endpoint(config: ConfigManager = Depends(get_config_dependency)):
+            return {"version": config.algorithm.version}
+    
+    Returns:
+        ConfigManager instance
+        
+    Raises:
+        RuntimeError: If config not initialized
+    """
+    global _config_instance
+    if _config_instance is None:
+        # Auto-initialize with defaults for convenience
+        _config_instance = ConfigManager()
+    return _config_instance
+
+
+def close_config() -> None:
+    """
+    Close the global config instance.
+    
+    Call this during application shutdown if needed.
+    """
+    global _config_instance
+    _config_instance = None
+    ConfigManager.reset_instance()
