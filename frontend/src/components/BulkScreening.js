@@ -24,7 +24,7 @@ Carlos Hernández,,CO,,VE`;
  */
 function generateReportHTML(result) {
   const { input, is_hit, hit_count, matches, screening_id } = result;
-  const dateFormatted = new Date().toLocaleDateString('es-PA', {
+  const dateFormatted = new Date().toLocaleString('es-PA', {
     day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
   });
   
@@ -497,7 +497,7 @@ function generateBulkReportHTML(results) {
                 <td>${pais}</td>
                 <td><span class="badge ${r.is_hit ? 'hit' : 'clear'}">${r.is_hit ? '⚠️ HIT' : '✅ OK'}</span></td>
                 <td>${r.hit_count || 0}</td>
-                <td><span class="badge ${rec.toLowerCase().replace('_', '-')}">${
+                <td><span class="badge ${rec.toLowerCase().replace(/_/g, '-')}">${
                   rec === 'AUTO_ESCALATE' ? 'ESCALAR' :
                   rec === 'REJECT' ? 'RECHAZAR' :
                   rec === 'AUTO_CLEAR' ? 'AUTO OK' :
@@ -562,13 +562,39 @@ function BulkScreening({ disabled }) {
           return;
         }
         
+        // Simple CSV parser that handles quoted values
+        const parseCSVLine = (line) => {
+          const values = [];
+          let current = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') {
+              if (inQuotes && line[i + 1] === '"') {
+                current += '"';
+                i++; // Skip escaped quote
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === ',' && !inQuotes) {
+              values.push(current.trim());
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          values.push(current.trim());
+          return values;
+        };
+        
         // Parse headers
-        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase());
         
         // Parse rows (max 5 for preview)
         const rows = [];
         for (let i = 1; i < Math.min(lines.length, 6); i++) {
-          const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+          const values = parseCSVLine(lines[i]);
           const row = {};
           headers.forEach((h, idx) => {
             row[h] = values[idx] || '';
@@ -1010,9 +1036,9 @@ function BulkScreening({ disabled }) {
                       {filePreview.rows.map((row, idx) => (
                         <tr key={idx}>
                           <td>{idx + 1}</td>
-                          <td>{row.nombre || '-'}</td>
-                          <td>{row.cedula || row.documento || '-'}</td>
-                          <td>{row.pais || '-'}</td>
+                          <td>{row.nombre || row.name || '-'}</td>
+                          <td>{row.cedula || row.documento || row.document || '-'}</td>
+                          <td>{row.pais || row.country || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
