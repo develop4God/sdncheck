@@ -14,36 +14,36 @@ function HealthCheck({ onHealthUpdate }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetchHealth();
-    // Refrescar cada 60 segundos
-    const interval = setInterval(fetchHealth, 60000);
-    return () => clearInterval(interval);
-  }, []);
+    const checkHealth = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/v1/health`);
+        if (!response.ok) {
+          throw new Error(`Error del servidor: ${response.status}`);
+        }
+        const data = await response.json();
+        setHealth(data);
+        setError(null);
+        if (onHealthUpdate) {
+          onHealthUpdate(data);
+        }
+      } catch (err) {
+        const message = err.name === 'TypeError' 
+          ? 'Error de red: No se puede conectar al servidor' 
+          : err.message;
+        setError(message);
+        if (onHealthUpdate) {
+          onHealthUpdate(null);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const fetchHealth = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/v1/health`);
-      if (!response.ok) {
-        throw new Error(`Error del servidor: ${response.status}`);
-      }
-      const data = await response.json();
-      setHealth(data);
-      setError(null);
-      if (onHealthUpdate) {
-        onHealthUpdate(data);
-      }
-    } catch (err) {
-      const message = err.name === 'TypeError' 
-        ? 'Error de red: No se puede conectar al servidor' 
-        : err.message;
-      setError(message);
-      if (onHealthUpdate) {
-        onHealthUpdate(null);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+    checkHealth();
+    // Refrescar cada 60 segundos
+    const interval = setInterval(checkHealth, 60000);
+    return () => clearInterval(interval);
+  }, [onHealthUpdate]);
 
   // Determinar el estado visual
   const getStatusClass = () => {
