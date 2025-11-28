@@ -20,60 +20,110 @@ Carlos Hernández,,CO,,VE`;
 
 /**
  * Genera HTML profesional para un reporte de screening individual
+ * Estilo basado en report_generator.py del backend
  */
 function generateReportHTML(result) {
   const { input, is_hit, hit_count, matches, screening_id } = result;
-  const timestamp = new Date().toLocaleString('es-PA');
+  const dateFormatted = new Date().toLocaleDateString('es-PA', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+  
+  // Get input fields with fallbacks
+  const nombre = input?.nombre || input?.name || 'No especificado';
+  const documento = input?.cedula || input?.document || input?.documento || 'No especificado';
+  const pais = input?.pais || input?.country || 'No especificado';
+  const nacionalidad = input?.nacionalidad || input?.nationality || '';
+  const fechaNacimiento = input?.fecha_nacimiento || input?.dob || '';
   
   const matchesHTML = is_hit && matches?.length > 0 
     ? matches.map((match, i) => {
         const entity = match.entity || {};
         const confidence = match.confidence || {};
         const confidenceLevel = confidence.overall || 0;
-        const confidenceClass = confidenceLevel >= 90 ? 'high' : confidenceLevel >= 70 ? 'medium' : 'low';
+        const matchedName = match.matched_name || entity.name || 'N/A';
+        
+        // Get identifications
+        const identifications = entity.identity_documents || [];
+        const idNumbers = identifications.map(id => id.number || id.id_number).filter(Boolean);
         
         return `
           <div class="match-card">
-            <div class="match-header">
-              <span class="match-number">#${i + 1}</span>
-              <span class="confidence ${confidenceClass}">${confidenceLevel.toFixed(1)}%</span>
-            </div>
-            <div class="match-details">
-              <div class="detail-row">
-                <span class="label">Nombre en Lista:</span>
-                <span class="value primary">${entity.name || 'N/A'}</span>
-              </div>
-              <div class="detail-row">
-                <span class="label">Fuente:</span>
-                <span class="value source">${entity.source || 'N/A'}</span>
-              </div>
+            <div class="match-score">${confidenceLevel.toFixed(2)}%</div>
+            <h3 style="color: #e74c3c; margin-bottom: 10px;">${matchedName}</h3>
+            
+            <div class="info-grid" style="margin-top: 15px;">
+              <div class="info-label">Tipo:</div>
+              <div>${(entity.type || 'individual').toUpperCase()}</div>
+              
+              <div class="info-label">Lista:</div>
+              <div><strong>${entity.source || 'N/A'}</strong></div>
+              
+              <div class="info-label">ID Entidad:</div>
+              <div style="font-family: monospace; font-size: 0.9em;">${entity.id || 'N/A'}</div>
+              
               ${entity.program ? `
-              <div class="detail-row">
-                <span class="label">Programa:</span>
-                <span class="value">${entity.program}</span>
-              </div>` : ''}
-              ${entity.type ? `
-              <div class="detail-row">
-                <span class="label">Tipo:</span>
-                <span class="value">${entity.type === 'individual' ? 'Persona' : 'Entidad'}</span>
-              </div>` : ''}
-              ${entity.countries?.length ? `
-              <div class="detail-row">
-                <span class="label">Países:</span>
-                <span class="value">${entity.countries.join(', ')}</span>
-              </div>` : ''}
-              ${entity.aliases?.length ? `
-              <div class="detail-row">
-                <span class="label">Alias:</span>
-                <span class="value aliases">${entity.aliases.slice(0, 5).join(', ')}${entity.aliases.length > 5 ? ` (+${entity.aliases.length - 5} más)` : ''}</span>
-              </div>` : ''}
-              <div class="detail-row">
-                <span class="label">Recomendación:</span>
-                <span class="value recommendation ${match.recommendation?.toLowerCase() || 'review'}">${
-                  match.recommendation === 'REJECT' ? '🚫 RECHAZAR' :
-                  match.recommendation === 'APPROVE' ? '✅ APROBAR' : '⚠️ REVISAR'
-                }</span>
+              <div class="info-label">Programa:</div>
+              <div>${entity.program}</div>
+              ` : ''}
+              
+              <div class="info-label">Identificación:</div>
+              <div style="font-size: 1.1em; font-weight: bold;">
+                ${idNumbers.length > 0 ? idNumbers.join(', ') : '<span style="color:#e74c3c;">No disponible en la lista</span>'}
               </div>
+              
+              ${entity.firstName || entity.first_name ? `
+              <div class="info-label">Nombre:</div>
+              <div>${entity.firstName || entity.first_name}</div>
+              ` : ''}
+              
+              ${entity.lastName || entity.last_name ? `
+              <div class="info-label">Apellido:</div>
+              <div>${entity.lastName || entity.last_name}</div>
+              ` : ''}
+              
+              ${entity.nationality ? `
+              <div class="info-label">Nacionalidad:</div>
+              <div>${entity.nationality}</div>
+              ` : ''}
+              
+              ${entity.dateOfBirth || entity.date_of_birth ? `
+              <div class="info-label">Fecha de Nacimiento:</div>
+              <div>${entity.dateOfBirth || entity.date_of_birth}</div>
+              ` : ''}
+              
+              ${entity.countries?.length ? `
+              <div class="info-label">Países:</div>
+              <div>${entity.countries.join(', ')}</div>
+              ` : ''}
+              
+              ${match.flags?.includes('SECONDARY_SANCTIONS_RISK') ? `
+              <div class="info-label" style="color:#d35400;font-weight:bold;">Riesgo de Sanciones Secundarias:</div>
+              <div style="color:#d35400;font-weight:bold;">⚠️ Este sujeto está vinculado a sanciones secundarias OFAC</div>
+              ` : ''}
+            </div>
+            
+            ${entity.aliases?.length > 0 || entity.all_names?.length > 1 ? `
+            <div style="margin-top: 15px;">
+              <strong>Alias conocidos:</strong>
+              <ul style="margin-left: 20px; margin-top: 5px;">
+                ${(entity.aliases || entity.all_names?.slice(1) || []).slice(0, 10).map(alias => `<li>${alias}</li>`).join('')}
+                ${(entity.aliases?.length || entity.all_names?.length - 1 || 0) > 10 ? `<li>... y ${(entity.aliases?.length || entity.all_names?.length - 1) - 10} más</li>` : ''}
+              </ul>
+            </div>
+            ` : ''}
+            
+            <div style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+              <strong>Recomendación:</strong>
+              <span style="margin-left: 10px; padding: 4px 12px; border-radius: 4px; font-weight: bold;
+                ${match.recommendation === 'AUTO_ESCALATE' || match.recommendation === 'REJECT' ? 'background: #fee2e2; color: #dc2626;' : 
+                  match.recommendation === 'AUTO_CLEAR' || match.recommendation === 'APPROVE' ? 'background: #dcfce7; color: #16a34a;' :
+                  'background: #fef3c7; color: #d97706;'}">
+                ${match.recommendation === 'AUTO_ESCALATE' ? '⚠️ ESCALACIÓN AUTOMÁTICA' :
+                  match.recommendation === 'REJECT' ? '🚫 RECHAZAR' :
+                  match.recommendation === 'AUTO_CLEAR' ? '✅ APROBACIÓN AUTOMÁTICA' :
+                  match.recommendation === 'APPROVE' ? '✅ APROBAR' :
+                  '⚠️ REVISIÓN MANUAL REQUERIDA'}
+              </span>
             </div>
           </div>
         `;
@@ -86,185 +136,191 @@ function generateReportHTML(result) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Reporte de Screening - ${input?.nombre || 'N/A'}</title>
+  <title>Constancia de Screening - ${nombre}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       line-height: 1.6;
-      color: #1e293b;
-      background: #f8fafc;
-      padding: 20px;
-    }
-    .report {
-      max-width: 800px;
+      color: #333;
+      max-width: 210mm;
       margin: 0 auto;
+      padding: 20mm;
+      background: #f5f5f5;
+    }
+    .report-container {
       background: white;
-      border-radius: 16px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-      overflow: hidden;
+      padding: 40px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.1);
+      border-radius: 8px;
     }
     .header {
-      padding: 30px;
+      border-bottom: 3px solid #2c3e50;
+      padding-bottom: 20px;
+      margin-bottom: 30px;
       text-align: center;
-      color: white;
-      background: ${is_hit ? 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)' : 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'};
     }
-    .header h1 { font-size: 24px; margin-bottom: 8px; }
-    .header .subtitle { opacity: 0.9; font-size: 14px; }
+    .header h1 {
+      color: #2c3e50;
+      font-size: 22px;
+      margin-bottom: 10px;
+    }
+    .header .subtitle {
+      color: #7f8c8d;
+      font-size: 14px;
+    }
     .status-badge {
       display: inline-block;
-      padding: 8px 20px;
-      margin-top: 15px;
-      background: rgba(255,255,255,0.2);
-      border-radius: 20px;
-      font-weight: 600;
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-weight: bold;
       font-size: 16px;
+      margin: 20px 0;
     }
-    .content { padding: 30px; }
+    .status-hit { background: #e74c3c; color: white; }
+    .status-clear { background: #27ae60; color: white; }
     .section {
-      margin-bottom: 25px;
-      padding-bottom: 20px;
-      border-bottom: 1px solid #e2e8f0;
+      margin: 30px 0;
     }
-    .section:last-child { border-bottom: none; margin-bottom: 0; }
     .section h2 {
-      font-size: 16px;
-      color: #0d1b2a;
+      color: #34495e;
+      font-size: 18px;
+      border-bottom: 2px solid #ecf0f1;
+      padding-bottom: 10px;
       margin-bottom: 15px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
     }
     .info-grid {
       display: grid;
-      grid-template-columns: 150px 1fr;
+      grid-template-columns: 180px 1fr;
       gap: 10px;
+      margin: 15px 0;
     }
-    .info-label { font-weight: 600; color: #64748b; font-size: 13px; }
-    .info-value { font-weight: 500; }
+    .info-label {
+      font-weight: bold;
+      color: #7f8c8d;
+    }
     .match-card {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
       padding: 20px;
-      margin-bottom: 15px;
+      margin: 15px 0;
+      background: #f9f9f9;
     }
-    .match-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 15px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid #e2e8f0;
+    .match-score {
+      font-size: 24px;
+      font-weight: bold;
+      color: #e74c3c;
+      float: right;
     }
-    .match-number { font-weight: 700; color: #64748b; }
-    .confidence {
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-weight: 700;
-      font-size: 14px;
-    }
-    .confidence.high { background: #fee2e2; color: #dc2626; }
-    .confidence.medium { background: #fef3c7; color: #d97706; }
-    .confidence.low { background: #dcfce7; color: #16a34a; }
-    .match-details .detail-row { display: flex; padding: 6px 0; }
-    .detail-row .label { flex: 0 0 140px; font-size: 13px; color: #64748b; }
-    .detail-row .value { flex: 1; font-weight: 500; }
-    .detail-row .value.primary { font-size: 16px; color: #0d1b2a; }
-    .detail-row .value.source {
-      display: inline-block;
-      background: #1b3a5c;
-      color: white;
-      padding: 2px 10px;
-      border-radius: 4px;
-      font-size: 12px;
-    }
-    .detail-row .value.aliases { font-style: italic; font-size: 13px; }
-    .detail-row .value.recommendation { font-weight: 700; }
-    .recommendation.reject { color: #dc2626; }
-    .recommendation.approve { color: #16a34a; }
-    .recommendation.review, .recommendation.manual_review { color: #d97706; }
     .footer {
-      padding: 20px 30px;
-      background: #f8fafc;
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #e0e0e0;
       font-size: 12px;
-      color: #64748b;
-      text-align: center;
-      border-top: 1px solid #e2e8f0;
+      color: #7f8c8d;
     }
-    .no-print { }
+    .screening-id {
+      font-family: monospace;
+      font-size: 11px;
+      color: #95a5a6;
+      word-break: break-all;
+    }
     @media print {
-      body { padding: 0; background: white; }
-      .report { box-shadow: none; }
+      body { background: white; padding: 10mm; }
+      .report-container { box-shadow: none; }
       .no-print { display: none !important; }
     }
   </style>
 </head>
 <body>
-  <div class="report">
+  <button onclick="window.print()" class="no-print" style="position:fixed;top:30px;right:40px;padding:10px 18px;font-size:16px;background:#34495e;color:#fff;border:none;border-radius:6px;cursor:pointer;z-index:1000;">🖨️ Imprimir Reporte</button>
+  
+  <div class="report-container">
     <div class="header">
-      <h1>🛡️ SDNCheck PA</h1>
-      <div class="subtitle">Constancia de Verificación de Sanciones</div>
-      <div class="status-badge">
-        ${is_hit ? '⚠️ COINCIDENCIA ENCONTRADA' : '✅ SIN COINCIDENCIAS'}
+      <div style="margin-bottom: 15px;">
+        <span style="font-size: 48px;">🛡️</span>
+      </div>
+      <h1>CONSTANCIA DE VERIFICACIÓN DE LISTAS DE SANCIONES</h1>
+      <div class="subtitle">SDNCheck PA - Screening contra listas OFAC y UN</div>
+    </div>
+    
+    <div class="status-badge ${is_hit ? 'status-hit' : 'status-clear'}">
+      ${is_hit ? '⚠️ COINCIDENCIA DETECTADA' : '✅ SIN COINCIDENCIAS'}
+    </div>
+    
+    <div class="section">
+      <h2>📋 Información del Sujeto Evaluado</h2>
+      <div class="info-grid">
+        <div class="info-label">Nombre:</div>
+        <div><strong>${nombre}</strong></div>
+        
+        <div class="info-label">Documento:</div>
+        <div>${documento}</div>
+        
+        <div class="info-label">País:</div>
+        <div>${pais}</div>
+        
+        ${nacionalidad ? `
+        <div class="info-label">Nacionalidad:</div>
+        <div>${nacionalidad}</div>
+        ` : ''}
+        
+        ${fechaNacimiento ? `
+        <div class="info-label">Fecha de Nacimiento:</div>
+        <div>${fechaNacimiento}</div>
+        ` : ''}
+        
+        <div class="info-label">Fecha de Screening:</div>
+        <div>${dateFormatted}</div>
+        
+        <div class="info-label">ID Screening:</div>
+        <div class="screening-id">${screening_id || 'N/A'}</div>
       </div>
     </div>
     
-    <div class="content">
-      <div class="section">
-        <h2>📋 Información del Sujeto</h2>
-        <div class="info-grid">
-          <div class="info-label">Nombre:</div>
-          <div class="info-value">${input?.nombre || 'N/A'}</div>
-          
-          <div class="info-label">Documento:</div>
-          <div class="info-value">${input?.cedula || 'N/A'}</div>
-          
-          <div class="info-label">País:</div>
-          <div class="info-value">${input?.pais || 'N/A'}</div>
-          
-          <div class="info-label">ID Screening:</div>
-          <div class="info-value" style="font-family: monospace; font-size: 12px;">${screening_id || 'N/A'}</div>
-          
-          <div class="info-label">Fecha:</div>
-          <div class="info-value">${timestamp}</div>
-        </div>
-      </div>
-      
-      ${is_hit ? `
-      <div class="section">
-        <h2>⚠️ Coincidencias Detectadas (${hit_count})</h2>
-        ${matchesHTML}
-      </div>
-      ` : `
-      <div class="section" style="text-align: center; padding: 30px 0;">
-        <div style="font-size: 48px; margin-bottom: 15px;">✅</div>
-        <h2 style="color: #16a34a; margin-bottom: 10px;">Sin Coincidencias</h2>
-        <p style="color: #64748b;">
-          No se encontraron coincidencias en las listas de sanciones OFAC y ONU.
-        </p>
-      </div>
-      `}
+    ${is_hit ? `
+    <div class="section">
+      <h2>⚠️ Coincidencias Detectadas (${hit_count || matches?.length || 0})</h2>
+      ${matchesHTML}
+    </div>
+    ` : `
+    <div class="section">
+      <h2>✅ Resultado de Verificación</h2>
+      <p style="color: #27ae60; font-size: 16px; padding: 20px; background: #f0fff4; border-radius: 8px; text-align: center;">
+        <span style="font-size: 48px; display: block; margin-bottom: 10px;">✅</span>
+        No se encontraron coincidencias en las listas de sanciones consultadas (OFAC y ONU).
+      </p>
+    </div>
+    `}
+    
+    <div class="section">
+      <h2>📚 Listas Consultadas</h2>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <thead>
+          <tr style="background: #34495e; color: white;">
+            <th style="padding: 10px; text-align: left;">Fuente</th>
+            <th style="padding: 10px; text-align: left;">Descripción</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom: 1px solid #e0e0e0;">
+            <td style="padding: 10px;"><strong>OFAC SDN</strong></td>
+            <td style="padding: 10px;">Lista de Nacionales Especialmente Designados del Departamento del Tesoro de EE.UU.</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e0e0e0;">
+            <td style="padding: 10px;"><strong>ONU</strong></td>
+            <td style="padding: 10px;">Lista Consolidada de Sanciones del Consejo de Seguridad de las Naciones Unidas</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
     
     <div class="footer">
       <p><strong>Documento generado automáticamente por SDNCheck PA</strong></p>
-      <p>Este reporte es válido únicamente para la fecha indicada.</p>
+      <p>Fecha de generación: ${dateFormatted}</p>
+      <p style="margin-top: 10px;">Este reporte es válido únicamente para la fecha indicada. Las listas de sanciones se actualizan frecuentemente.</p>
+      <p style="margin-top: 5px; font-size: 10px; color: #bdc3c7;">ID: ${screening_id || 'N/A'}</p>
     </div>
-  </div>
-  
-  <div class="no-print" style="text-align: center; margin-top: 20px;">
-    <button onclick="window.print()" style="
-      padding: 12px 30px;
-      background: linear-gradient(135deg, #00b4d8 0%, #0096c7 100%);
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-    ">🖨️ Imprimir Reporte</button>
   </div>
 </body>
 </html>
@@ -430,16 +486,21 @@ function generateBulkReportHTML(results) {
             const rec = r.is_hit && r.matches?.[0]?.recommendation 
               ? r.matches[0].recommendation 
               : 'APPROVE';
+            const nombre = r.input?.nombre || r.input?.name || '-';
+            const documento = r.input?.cedula || r.input?.document || r.input?.documento || '-';
+            const pais = r.input?.pais || r.input?.country || '-';
             return `
               <tr class="${r.is_hit ? 'row-hit' : ''}">
                 <td>${i + 1}</td>
-                <td><strong>${r.input?.nombre || '-'}</strong></td>
-                <td>${r.input?.cedula || '-'}</td>
-                <td>${r.input?.pais || '-'}</td>
+                <td><strong>${nombre}</strong></td>
+                <td>${documento}</td>
+                <td>${pais}</td>
                 <td><span class="badge ${r.is_hit ? 'hit' : 'clear'}">${r.is_hit ? '⚠️ HIT' : '✅ OK'}</span></td>
                 <td>${r.hit_count || 0}</td>
-                <td><span class="badge ${rec.toLowerCase()}">${
+                <td><span class="badge ${rec.toLowerCase().replace('_', '-')}">${
+                  rec === 'AUTO_ESCALATE' ? 'ESCALAR' :
                   rec === 'REJECT' ? 'RECHAZAR' :
+                  rec === 'AUTO_CLEAR' ? 'AUTO OK' :
                   rec === 'APPROVE' ? 'APROBAR' : 'REVISAR'
                 }</span></td>
               </tr>
@@ -478,6 +539,7 @@ function BulkScreening({ disabled }) {
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [selectedResults, setSelectedResults] = useState(new Set());
+  const [filePreview, setFilePreview] = useState(null); // Preview of CSV records
   
   // Estados de paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -487,6 +549,45 @@ function BulkScreening({ disabled }) {
   const [filterType, setFilterType] = useState('all'); // 'all', 'hits', 'clear'
   
   const fileInputRef = useRef(null);
+
+  // Parse CSV file for preview
+  const parseCSVPreview = useCallback((file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.split('\n').filter(line => line.trim());
+        if (lines.length === 0) {
+          setFilePreview({ headers: [], rows: [], totalRows: 0 });
+          return;
+        }
+        
+        // Parse headers
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        
+        // Parse rows (max 5 for preview)
+        const rows = [];
+        for (let i = 1; i < Math.min(lines.length, 6); i++) {
+          const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+          const row = {};
+          headers.forEach((h, idx) => {
+            row[h] = values[idx] || '';
+          });
+          rows.push(row);
+        }
+        
+        setFilePreview({
+          headers,
+          rows,
+          totalRows: lines.length - 1 // Exclude header
+        });
+      } catch (err) {
+        console.error('Error parsing CSV:', err);
+        setFilePreview(null);
+      }
+    };
+    reader.readAsText(file);
+  }, []);
 
   // Filtrar resultados
   const filteredResults = useMemo(() => {
@@ -554,6 +655,8 @@ function BulkScreening({ disabled }) {
     setResults(null);
     setSelectedResults(new Set());
     setCurrentPage(1);
+    // Parse CSV for preview
+    parseCSVPreview(selectedFile);
   };
 
   // Manejar drag & drop
@@ -628,6 +731,7 @@ function BulkScreening({ disabled }) {
     setSelectedResults(new Set());
     setCurrentPage(1);
     setFilterType('all');
+    setFilePreview(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -851,7 +955,7 @@ function BulkScreening({ disabled }) {
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
+        onClick={() => !file && fileInputRef.current?.click()}
       >
         <input
           type="file"
@@ -863,24 +967,64 @@ function BulkScreening({ disabled }) {
         />
 
         {file ? (
-          <div className="file-selected">
-            <span className="file-icon">📄</span>
-            <div className="file-info">
-              <span className="file-name">{file.name}</span>
-              <span className="file-size">
-                {(file.size / 1024).toFixed(1)} KB
-              </span>
+          <div className="file-selected" onClick={(e) => e.stopPropagation()}>
+            <div className="file-selected-header">
+              <span className="file-icon-success">✅</span>
+              <div className="file-info">
+                <span className="file-name">{file.name}</span>
+                <span className="file-size">
+                  {(file.size / 1024).toFixed(1)} KB
+                  {filePreview && ` • ${filePreview.totalRows} registros`}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn-change-file"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleClear();
+                }}
+                title="Cambiar archivo"
+              >
+                🔄 Cambiar
+              </button>
             </div>
-            <button
-              type="button"
-              className="btn-remove"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleClear();
-              }}
-            >
-              ✕
-            </button>
+            
+            {/* Vista previa de registros */}
+            {filePreview && filePreview.rows.length > 0 && (
+              <div className="file-preview">
+                <div className="file-preview-header">
+                  <span className="preview-title">📋 Vista previa ({Math.min(5, filePreview.rows.length)} de {filePreview.totalRows} registros)</span>
+                </div>
+                <div className="file-preview-table-container">
+                  <table className="file-preview-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Nombre</th>
+                        <th>Documento</th>
+                        <th>País</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filePreview.rows.map((row, idx) => (
+                        <tr key={idx}>
+                          <td>{idx + 1}</td>
+                          <td>{row.nombre || '-'}</td>
+                          <td>{row.cedula || row.documento || '-'}</td>
+                          <td>{row.pais || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {filePreview.totalRows > 5 && (
+                  <div className="preview-more">
+                    ... y {filePreview.totalRows - 5} registros más
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="upload-placeholder">
@@ -1225,20 +1369,30 @@ function BulkResultRow({ result, displayIndex, selected, onToggle, onViewReport 
     ? matches[0].recommendation 
     : 'APPROVE';
 
+  // Handle different field name conventions
+  const nombre = input?.nombre || input?.name || '-';
+  const documento = input?.cedula || input?.document || input?.documento || '-';
+  const pais = input?.pais || input?.country || '-';
+
   const getRecommendationClass = () => {
     switch (recommendation) {
+      case 'AUTO_ESCALATE':
       case 'REJECT': return 'badge-reject';
       case 'REVIEW':
-      case 'MANUAL_REVIEW': return 'badge-review';
+      case 'MANUAL_REVIEW':
+      case 'LOW_CONFIDENCE_REVIEW': return 'badge-review';
       default: return 'badge-approve';
     }
   };
 
   const getRecommendationText = () => {
     switch (recommendation) {
+      case 'AUTO_ESCALATE': return 'ESCALAR';
       case 'REJECT': return 'RECHAZAR';
       case 'REVIEW':
-      case 'MANUAL_REVIEW': return 'REVISAR';
+      case 'MANUAL_REVIEW':
+      case 'LOW_CONFIDENCE_REVIEW': return 'REVISAR';
+      case 'AUTO_CLEAR': return 'AUTO OK';
       default: return 'APROBAR';
     }
   };
@@ -1253,9 +1407,9 @@ function BulkResultRow({ result, displayIndex, selected, onToggle, onViewReport 
         />
       </td>
       <td className="row-number">{displayIndex}</td>
-      <td className="cell-name"><strong>{input?.nombre || '-'}</strong></td>
-      <td>{input?.cedula || '-'}</td>
-      <td>{input?.pais || '-'}</td>
+      <td className="cell-name"><strong>{nombre}</strong></td>
+      <td>{documento}</td>
+      <td>{pais}</td>
       <td>
         <span className={`result-badge ${is_hit ? 'hit' : 'clear'}`}>
           {is_hit ? '⚠️ HIT' : '✅ OK'}

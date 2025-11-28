@@ -1197,6 +1197,103 @@ body {
   color: var(--color-text-light);
 }
 
+/* Updated file selection styles - more intuitive */
+.file-selected {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  width: 100%;
+}
+
+.file-selected-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  justify-content: center;
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.file-icon-success {
+  font-size: 2rem;
+}
+
+.btn-change-file {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  padding: 6px 14px;
+  border-radius: var(--border-radius-sm);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+}
+
+.btn-change-file:hover {
+  background: var(--color-border-light);
+  border-color: var(--color-text-muted);
+}
+
+/* File preview styles */
+.file-preview {
+  background: var(--color-bg);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-md);
+  margin-top: var(--spacing-sm);
+}
+
+.file-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-sm);
+}
+
+.preview-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.file-preview-table-container {
+  overflow-x: auto;
+  max-height: 200px;
+}
+
+.file-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.file-preview-table th,
+.file-preview-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.file-preview-table th {
+  background: var(--color-secondary);
+  color: white;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.file-preview-table tbody tr:hover {
+  background: rgba(0, 180, 216, 0.05);
+}
+
+.preview-more {
+  text-align: center;
+  padding: var(--spacing-sm);
+  font-size: 0.8rem;
+  color: var(--color-text-light);
+  font-style: italic;
+}
+
 .btn-remove {
   background: var(--color-danger);
   color: white;
